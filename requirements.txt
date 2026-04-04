@@ -1,5 +1,5 @@
 streamlit
-FinanceDataReader
+finance-datareader
 pandas
 numpy
 plotly
@@ -7,3 +7,4 @@ python-dateutil
 pytz
 openpyxl
 requests
+lxml
