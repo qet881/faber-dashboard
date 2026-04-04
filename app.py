@@ -682,22 +682,21 @@ def _chain_link_series(proxy_df, etf_df):
     if etf_df is None or etf_df.empty:
         return proxy_df
     
-    col = 'Close'
-    if col not in proxy_df.columns or col not in etf_df.columns:
-        return etf_df if etf_df is not None else proxy_df
+    # 시뮬레이션 기본값이 Adj Close이므로 체인링크 기준도 Adj Close를 우선 사용.
+    # (Close 기준으로 스케일링하면 Adj Close 시계열에 단계적 점프가 생길 수 있음)
+    proxy_clean = _standardize_price_frame(proxy_df)
+    etf_clean = _standardize_price_frame(etf_df)
+    if proxy_clean is None or proxy_clean.empty:
+        return etf_clean
+    if etf_clean is None or etf_clean.empty:
+        return proxy_clean
+
+    col = 'Adj Close' if ('Adj Close' in proxy_clean.columns and 'Adj Close' in etf_clean.columns) else 'Close'
+    if col not in proxy_clean.columns or col not in etf_clean.columns:
+        return etf_clean if etf_clean is not None else proxy_clean
     
-    # ETF DataFrame을 Close/Adj Close만 남기고 정리
-    etf_clean = pd.DataFrame(index=etf_df.index)
-    etf_clean['Close'] = etf_df['Close']
-    etf_clean['Adj Close'] = etf_df['Adj Close'] if 'Adj Close' in etf_df.columns else etf_df['Close']
-    
-    # 프록시도 동일하게 정리
-    proxy_clean = pd.DataFrame(index=proxy_df.index)
-    proxy_clean['Close'] = proxy_df['Close']
-    proxy_clean['Adj Close'] = proxy_df['Adj Close'] if 'Adj Close' in proxy_df.columns else proxy_df['Close']
-    
-    # ETF 데이터 시작일
-    etf_start = etf_clean.index.min()
+    # ETF 데이터 시작일(링크 기준 컬럼 유효 시작)
+    etf_start = etf_clean[col].dropna().index.min()
     
     # 스케일링 비율: ETF 초기 5거래일의 중앙값
     early_etf = etf_clean.head(5)
