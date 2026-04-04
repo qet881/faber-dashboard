@@ -1,0 +1,9 @@
+streamlit
+FinanceDataReader
+pandas
+numpy
+plotly
+python-dateutil
+pytz
+openpyxl
+requests
