@@ -1831,6 +1831,31 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
             st.dataframe(disp_fw[["월"] + list(ASSETS.keys()) + [CASH_NAME]], 
                          use_container_width=True, hide_index=True, height=400)
 
+    # 월별 기여도 원본(연간 집계 시 동일 경로 사용)
+    faber_attr_list = []
+    if faber_weight_records and len(faber_weight_records) > 1:
+        for i in range(len(faber_weight_records) - 1):
+            w_rec = faber_weight_records[i]
+            next_rec = faber_weight_records[i + 1]
+            d_start = w_rec["date"]
+            d_end = next_rec["date"]
+            attr = {"date": d_end.strftime("%Y-%m")}
+            total_pp = 0.0
+            for an in list(ASSETS.keys()) + [CASH_NAME]:
+                wt = w_rec.get(an, 0.0)
+                p1 = get_price_at_date(all_data.get(an), d_start, price_col=price_col)
+                p2 = get_price_at_date(all_data.get(an), d_end, price_col=price_col)
+                if p1 and p2 and p1 > 0 and wt > 0:
+                    ret = (p2 / p1) - 1
+                    contrib = wt * ret * 100.0  # pp
+                else:
+                    contrib = 0.0
+                attr[an] = round(contrib, 2)
+                total_pp += contrib
+            attr["합계"] = round(total_pp, 2)           # 표시용 pp
+            attr["total_return"] = total_pp / 100.0     # 집계용 decimal
+            faber_attr_list.append(attr)
+
     # 연도별 성과 요약 (Faber A 기준)
     if nav_df is not None and not nav_df.empty:
         years = sorted(nav_df.index.year.unique())
@@ -1841,6 +1866,15 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
             stats_list = [s for s in stats_list if s is not None]
             if stats_list:
                 dfy = pd.DataFrame(stats_list)
+                if faber_attr_list:
+                    df_m = pd.DataFrame(faber_attr_list)
+                    df_m["연도"] = df_m["date"].str[:4].astype(int)
+                    annual_from_monthly = (
+                        df_m.groupby("연도")["total_return"]
+                        .apply(lambda s: float((1.0 + s).prod() - 1.0))
+                        .to_dict()
+                    )
+                    dfy["yearly_return"] = dfy["year"].map(annual_from_monthly).fillna(dfy["yearly_return"])
                 st.dataframe(pd.DataFrame({
                     "연도": dfy["year"], "연간 수익률": dfy["yearly_return"].apply(lambda x: f"{x*100:.2f}%"),
                     "거래일": dfy["total_days"], "상승일": dfy["up_days"], "하락일": dfy["down_days"],
@@ -1850,34 +1884,10 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
                 }), use_container_width=True, hide_index=True)
 
     # Faber A 월별 자산 수익 기여도 분석
-    if faber_weight_records and len(faber_weight_records) > 1:
+    if faber_attr_list:
         st.markdown("---")
         st.subheader("🔍 Faber A 월별 자산 수익 기여도 분석")
-        
-        # 월말 비중 + 다음달 자산 수익률 → 기여도
-        faber_attr_list = []
-        for i in range(len(faber_weight_records) - 1):
-            w_rec = faber_weight_records[i]
-            next_rec = faber_weight_records[i + 1]
-            d_start = w_rec["date"]
-            d_end = next_rec["date"]
-            
-            attr = {"date": d_end.strftime("%Y-%m")}
-            total = 0.0
-            for an in list(ASSETS.keys()) + [CASH_NAME]:
-                wt = w_rec.get(an, 0.0)
-                p1 = get_price_at_date(all_data.get(an), d_start, price_col=price_col)
-                p2 = get_price_at_date(all_data.get(an), d_end, price_col=price_col)
-                if p1 and p2 and p1 > 0 and wt > 0:
-                    ret = (p2 / p1) - 1
-                    contrib = wt * ret * 100  # pp
-                else:
-                    contrib = 0.0
-                attr[an] = round(contrib, 2)
-                total += contrib
-            attr["합계"] = round(total, 2)
-            faber_attr_list.append(attr)
-        
+
         if faber_attr_list:
             df_fa = pd.DataFrame(faber_attr_list)
             all_yrs = sorted(set(int(d[:4]) for d in df_fa["date"]))
@@ -1894,7 +1904,7 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
             
             if len(df_filt) > 0:
                 # 차트
-                asset_cols = [c for c in df_filt.columns if c not in ["date", "합계"]]
+                asset_cols = [c for c in df_filt.columns if c not in ["date", "합계", "total_return"]]
                 fig_fa = go.Figure()
                 attr_colors = {'코스피200': '#1f77b4', '미국나스닥100': '#ff7f0e', '한국채30년': '#2ca02c',
                               '미국채30년': '#d62728', '금현물': '#FFD700', CASH_NAME: '#9467bd'}
@@ -1923,7 +1933,8 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
                 st.plotly_chart(fig_fa, use_container_width=True)
                 
                 with st.expander("📊 월별 수익률 상세"):
-                    st.dataframe(df_filt, use_container_width=True, hide_index=True, height=400)
+                    st.dataframe(df_filt.drop(columns=["total_return"], errors="ignore"),
+                                 use_container_width=True, hide_index=True, height=400)
 
     # ==============================
     # 자산별 역할 분석
