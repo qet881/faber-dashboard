@@ -1301,6 +1301,67 @@ def simulate_static_benchmark(start_date, end_date, initial_capital, all_data, p
     return df
 
 
+def build_faber_monthly_attribution(start_date, end_date, all_data, price_col="Close"):
+    """Faber A 월말 비중 기준 월별 기여도/수익률 생성."""
+    trading_dates_all = build_trading_calendar(all_data, start_date, end_date)
+    if len(trading_dates_all) < 2:
+        return [], []
+
+    month_ends = []
+    for i, d in enumerate(trading_dates_all):
+        if i == len(trading_dates_all) - 1:
+            month_ends.append(d)
+        elif trading_dates_all[i + 1].month != d.month or trading_dates_all[i + 1].year != d.year:
+            month_ends.append(d)
+
+    weight_records = []
+    for d in month_ends:
+        w = calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
+        row = {"date": d}
+        for an in ASSETS:
+            row[an] = w.get(an, 0.0)
+        row[CASH_NAME] = w.get(CASH_NAME, 0.0)
+        weight_records.append(row)
+
+    attr_list = []
+    if len(weight_records) > 1:
+        for i in range(len(weight_records) - 1):
+            w_rec = weight_records[i]
+            next_rec = weight_records[i + 1]
+            d_start = w_rec["date"]
+            d_end = next_rec["date"]
+            attr = {"period_end": d_end, "date": d_end.strftime("%Y-%m")}
+            total_pp = 0.0
+            for an in list(ASSETS.keys()) + [CASH_NAME]:
+                wt = w_rec.get(an, 0.0)
+                p1 = get_price_at_date(all_data.get(an), d_start, price_col=price_col)
+                p2 = get_price_at_date(all_data.get(an), d_end, price_col=price_col)
+                if p1 and p2 and p1 > 0 and wt > 0:
+                    ret = (p2 / p1) - 1
+                    contrib = wt * ret * 100.0
+                else:
+                    contrib = 0.0
+                attr[an] = round(contrib, 2)
+                total_pp += contrib
+            attr["합계"] = round(total_pp, 2)
+            attr["total_return"] = total_pp / 100.0
+            attr_list.append(attr)
+
+    return weight_records, attr_list
+
+
+def build_nav_from_monthly_returns(start_date, initial_capital, monthly_attr):
+    nav_records = [{"date": start_date, "nav": float(initial_capital)}]
+    nav = float(initial_capital)
+    for row in monthly_attr:
+        nav *= (1.0 + float(row.get("total_return", 0.0)))
+        nav_records.append({"date": row["period_end"], "nav": nav})
+    df = pd.DataFrame(nav_records).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
 def build_benchmark_etf_returns(benchmark_df, strategy_nav_df, initial_capital):
     """보조 벤치마크 ETF의 수익률을 전략 시작일 기준으로 정규화."""
     if benchmark_df is None or benchmark_df.empty or strategy_nav_df is None:
@@ -1746,6 +1807,11 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
     if nav_df is None:
         st.error("백테스트 불가(데이터 부족). 시작일을 더 최근으로 조정해보세요.")
         return
+
+    faber_weight_records, faber_attr_list = build_faber_monthly_attribution(
+        bt_start_date, current_date, all_data, price_col=price_col
+    )
+    perf_nav_df = build_nav_from_monthly_returns(nav_df.index[0], IC, faber_attr_list) if faber_attr_list else nav_df
     
     # 기존 연속 모멘텀 (차트 비교 참고용)
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
@@ -1756,10 +1822,10 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
     benchmark_nav = build_benchmark_etf_returns(benchmark_raw, nav_df, IC)
 
     # 성과 지표 (Faber A)
-    s_value, s_return, s_mdd, s_cagr = calculate_performance_metrics(nav_df, IC)
-    s_peak, s_valley, _ = find_mdd_period(nav_df)
-    s_monthly_mdd = calculate_monthly_mdd(nav_df)
-    s_m_peak, s_m_valley, s_m_mdd_val = find_monthly_mdd_period(nav_df)
+    s_value, s_return, s_mdd, s_cagr = calculate_performance_metrics(perf_nav_df, IC)
+    s_peak, s_valley, _ = find_mdd_period(perf_nav_df)
+    s_monthly_mdd = calculate_monthly_mdd(perf_nav_df)
+    s_m_peak, s_m_valley, s_m_mdd_val = find_monthly_mdd_period(perf_nav_df)
 
     st.markdown("#### 📊 Faber A 전략 성과")
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1777,7 +1843,7 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
     st.subheader("📉 Faber A 성과 차트")
     extra = {"이전 전략: 연속 모멘텀 (참고)": (old_nav, "#ff7f0e", "dash")} if old_nav is not None else {}
     extra["동일비중 B&H"] = (static_nav, "gray", "dot")
-    fig = create_nav_and_drawdown_chart(nav_df, IC, s_peak, s_valley,
+    fig = create_nav_and_drawdown_chart(perf_nav_df, IC, s_peak, s_valley,
         "Faber A 전략: 수익률 및 Drawdown",
         monthly_peak_date=s_m_peak, monthly_valley_date=s_m_valley, monthly_mdd_val=s_m_mdd_val,
         extra_navs=extra)
@@ -1787,23 +1853,6 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
     st.markdown("---")
     st.subheader("📊 Faber A 월별 자산 배분 비중")
     st.caption("💡 **Faber A 룰**: 12개월 고점 -5% 이내 → 20%, 아님 → 0%. ● = 투자, ○ = 현금.")
-    
-    trading_dates_all = build_trading_calendar(all_data, bt_start_date, current_date)
-    faber_month_ends = []
-    for i, d in enumerate(trading_dates_all):
-        if i == len(trading_dates_all) - 1:
-            faber_month_ends.append(d)
-        elif trading_dates_all[i+1].month != d.month or trading_dates_all[i+1].year != d.year:
-            faber_month_ends.append(d)
-    
-    faber_weight_records = []
-    for d in faber_month_ends:
-        w = calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
-        row = {"date": d}
-        for an in ASSETS:
-            row[an] = w.get(an, 0.0)
-        row[CASH_NAME] = w.get(CASH_NAME, 0.0)
-        faber_weight_records.append(row)
     
     if faber_weight_records:
         df_fw = pd.DataFrame(faber_weight_records)
@@ -1830,31 +1879,6 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
             disp_fw[CASH_NAME] = (disp_fw[CASH_NAME]*100).round(0).astype(int).astype(str) + "%"
             st.dataframe(disp_fw[["월"] + list(ASSETS.keys()) + [CASH_NAME]], 
                          use_container_width=True, hide_index=True, height=400)
-
-    # 월별 기여도 원본(연간 집계 시 동일 경로 사용)
-    faber_attr_list = []
-    if faber_weight_records and len(faber_weight_records) > 1:
-        for i in range(len(faber_weight_records) - 1):
-            w_rec = faber_weight_records[i]
-            next_rec = faber_weight_records[i + 1]
-            d_start = w_rec["date"]
-            d_end = next_rec["date"]
-            attr = {"date": d_end.strftime("%Y-%m")}
-            total_pp = 0.0
-            for an in list(ASSETS.keys()) + [CASH_NAME]:
-                wt = w_rec.get(an, 0.0)
-                p1 = get_price_at_date(all_data.get(an), d_start, price_col=price_col)
-                p2 = get_price_at_date(all_data.get(an), d_end, price_col=price_col)
-                if p1 and p2 and p1 > 0 and wt > 0:
-                    ret = (p2 / p1) - 1
-                    contrib = wt * ret * 100.0  # pp
-                else:
-                    contrib = 0.0
-                attr[an] = round(contrib, 2)
-                total_pp += contrib
-            attr["합계"] = round(total_pp, 2)           # 표시용 pp
-            attr["total_return"] = total_pp / 100.0     # 집계용 decimal
-            faber_attr_list.append(attr)
 
     # 연도별 성과 요약 (Faber A 기준)
     if nav_df is not None and not nav_df.empty:
@@ -1904,7 +1928,7 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
             
             if len(df_filt) > 0:
                 # 차트
-                asset_cols = [c for c in df_filt.columns if c not in ["date", "합계", "total_return"]]
+                asset_cols = [c for c in df_filt.columns if c not in ["period_end", "date", "합계", "total_return"]]
                 fig_fa = go.Figure()
                 attr_colors = {'코스피200': '#1f77b4', '미국나스닥100': '#ff7f0e', '한국채30년': '#2ca02c',
                               '미국채30년': '#d62728', '금현물': '#FFD700', CASH_NAME: '#9467bd'}
@@ -1945,7 +1969,7 @@ ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 �
         st.caption("각 자산이 포트폴리오에 얼마나 기여했는지. 채권과 금의 방어 역할을 확인할 수 있습니다.")
         
         df_all_attr = pd.DataFrame(faber_attr_list)
-        asset_names = [c for c in df_all_attr.columns if c not in ["date", "합계"]]
+        asset_names = [c for c in df_all_attr.columns if c not in ["period_end", "date", "합계", "total_return"]]
         
         # 총 분석 기간 표시
         total_analysis_months = len(df_all_attr)
