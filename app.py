@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 import io
+import os
+import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -20,7 +22,7 @@ st.set_page_config(page_title="통합 투자 솔루션 (분석 & 실행)", page_
 DEFAULT_INVESTMENT_START_DATE = datetime(2026, 3, 31)
 DEFAULT_INITIAL_CAPITAL = 249008318  # 3/31 종가 확정 총자산
 DEFAULT_HISTORICAL_REALIZED_PROFIT = 67571303  # (249,008,318 - 226,356,552) + 44,919,537
-DEFAULT_BACKTEST_START_DATE = datetime(2013, 6, 1)
+DEFAULT_BACKTEST_START_DATE = datetime(2000, 1, 1)
 
 DEFAULT_GEN_KOSPI_BAL = 100_870_700
 DEFAULT_GEN_GOLD_BAL = 0
@@ -69,6 +71,102 @@ PROXY_CASH = {
     'annual_rate': 0.025,
     'note': '합성 현금 (연 2.5% 가정)'
 }
+
+# ==============================
+# 1-1. 장기 백테스트(2000년~)용 프록시 설정
+# ==============================
+US_LONG_BOND_DURATION = 16.0
+KR_LONG_BOND_DURATION = 12.0
+MAX_SYNTH_DAILY_MOVE = 0.03
+
+ECOS_KTB_TABLE = '060Y001'
+ECOS_KTB_CYCLE = 'DD'
+ECOS_KTB_10Y_CODES = ['010210000', '010220000', '010230000']
+ECOS_KTB_30Y_CODES = ['010230000', '010220000', '010210000']
+ECOS_CASH_CODES = ['010400001', '010400000', '010190000']
+FRED_US_LONG_YIELD_SERIES = ['DGS30', 'DGS20', 'DGS10']
+FRED_US_CASH_SERIES = ['DGS3MO', 'DTB3']
+
+LONG_HISTORY_PROXY_STEPS = {
+    '코스피200': [
+        {'type': 'kr_index', 'ticker': 'KS200', 'note': 'KOSPI200 지수'},
+        {'type': 'kr_etf', 'ticker': '069500', 'note': 'KODEX 200 ETF'}
+    ],
+    '미국나스닥100': [
+        {'type': 'us_etf_fx', 'ticker': 'QQQ', 'fx': 'USD/KRW', 'note': 'QQQ x USD/KRW 합성'}
+    ],
+    '한국채30년': [
+        {
+            'type': 'ecos_yield_total_return',
+            'stat_code': ECOS_KTB_TABLE,
+            'cycle': ECOS_KTB_CYCLE,
+            'item_code_candidates': ECOS_KTB_30Y_CODES,
+            'duration': KR_LONG_BOND_DURATION,
+            'note': 'ECOS 장기 국고채 수익률 기반 총수익 프록시'
+        },
+        {
+            'type': 'kr_yield_total_return',
+            'ticker_candidates': ['KR30YT=RR', 'KR20YT=RR', 'KR10YT=RR'],
+            'duration': KR_LONG_BOND_DURATION,
+            'note': '장기 국채금리 기반 총수익 프록시'
+        },
+        {
+            'type': 'kr_etf_duration_adjusted',
+            'ticker': '148070',
+            'duration_factor': KR_BOND_DURATION_FACTOR,
+            'note': f'KOSEF 국고채10년 x 듀레이션 배수({KR_BOND_DURATION_FACTOR}x) 합성'
+        }
+    ],
+    '미국채30년': [
+        {
+            'type': 'fred_yield_total_return_fx',
+            'series_candidates': FRED_US_LONG_YIELD_SERIES,
+            'duration': US_LONG_BOND_DURATION,
+            'fx': 'USD/KRW',
+            'note': 'FRED 미국 장기금리 기반 총수익 x USD/KRW'
+        },
+        {
+            'type': 'us_yield_total_return_fx',
+            'ticker_candidates': ['US30YT=X', 'US10YT=X'],
+            'duration': US_LONG_BOND_DURATION,
+            'fx': 'USD/KRW',
+            'note': '미국 장기금리 기반 총수익 x USD/KRW'
+        },
+        {'type': 'us_etf_fx', 'ticker': 'TLT', 'fx': 'USD/KRW', 'note': 'TLT x USD/KRW 합성'}
+    ],
+    '금현물': [
+        {'type': 'commodity_fx', 'ticker': 'GC', 'fx': 'USD/KRW', 'note': 'COMEX 금 선물 x USD/KRW'},
+        {'type': 'us_etf_fx', 'ticker': 'GLD', 'fx': 'USD/KRW', 'note': 'GLD x USD/KRW 합성'}
+    ],
+}
+
+LONG_HISTORY_CASH_STEPS = [
+    {
+        'type': 'ecos_short_rate_cash',
+        'stat_code': '060Y001',
+        'cycle': 'DD',
+        'item_code_candidates': ['010400001', '010400000', '010190000'],
+        'note': 'ECOS 단기금리 기반 합성 현금'
+    },
+    {
+        'type': 'kr_short_rate_cash',
+        'ticker_candidates': ['KR1YT=RR'],
+        'note': '한국 1년 국채수익률 기반 합성 현금'
+    },
+    {
+        'type': 'synthetic_cash',
+        'annual_rate': 0.025,
+        'note': '합성 현금 (연 2.5% 가정)'
+    }
+]
+
+PUBLIC_DATA_SETTINGS = {
+    'use_fred': True,
+    'use_ecos': True,
+    'fred_env_keys': ['FRED_API_KEY', 'fred_api_key'],
+    'ecos_env_keys': ['ECOS_API_KEY', 'BOK_ECOS_API_KEY', 'ecos_api_key'],
+}
+
 
 # 보조 벤치마크 ETF
 BENCHMARK_ETF = {
@@ -170,43 +268,234 @@ def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
         return None
 
 
-@st.cache_data(ttl=3600)
-def fetch_proxy_data(asset_name, start_date, end_date):
+def _standardize_price_frame(df):
+    if df is None or df.empty or 'Close' not in df.columns:
+        return None
+    df = df[~df.index.duplicated(keep='last')].sort_index()
+    out = pd.DataFrame(index=df.index)
+    out['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+    out['Adj Close'] = pd.to_numeric(df['Adj Close'], errors='coerce') if 'Adj Close' in df.columns else out['Close']
+    out = out.dropna(how='all')
+    return out
+
+
+def _get_secret_value(candidates):
+    for key in candidates:
+        try:
+            if hasattr(st, 'secrets') and key in st.secrets and st.secrets[key]:
+                return str(st.secrets[key])
+        except Exception:
+            pass
+        val = os.environ.get(key)
+        if val:
+            return val
+    return None
+
+
+def _public_source_status():
+    return {
+        'fred_key': bool(_get_secret_value(PUBLIC_DATA_SETTINGS['fred_env_keys'])),
+        'ecos_key': bool(_get_secret_value(PUBLIC_DATA_SETTINGS['ecos_env_keys'])),
+    }
+
+
+def _to_price_frame_from_series(series):
+    if series is None or len(series) == 0:
+        return None
+    s = pd.to_numeric(series, errors='coerce').dropna()
+    if len(s) == 0:
+        return None
+    df = pd.DataFrame({'Close': s.astype(float)}, index=pd.to_datetime(s.index))
+    df['Adj Close'] = df['Close']
+    return _standardize_price_frame(df)
+
+
+def _fetch_fred_series(series_id, start_date, end_date):
+    api_key = _get_secret_value(PUBLIC_DATA_SETTINGS['fred_env_keys'])
+    if not api_key or not PUBLIC_DATA_SETTINGS.get('use_fred', True):
+        return None
+    url = 'https://api.stlouisfed.org/fred/series/observations'
+    params = {
+        'series_id': series_id,
+        'api_key': api_key,
+        'file_type': 'json',
+        'observation_start': pd.Timestamp(start_date).strftime('%Y-%m-%d'),
+        'observation_end': pd.Timestamp(end_date).strftime('%Y-%m-%d'),
+    }
     try:
-        if asset_name == CASH_NAME:
-            config = PROXY_CASH
-        else:
-            config = PROXY_ASSETS.get(asset_name)
-        if config is None: return None
-        
-        if config['type'] == 'synthetic_cash':
-            ref_df = fdr.DataReader('069500', start_date, end_date)
-            if ref_df is None or ref_df.empty:
-                dates = pd.bdate_range(start=start_date, end=end_date)
+        resp = requests.get(url, params=params, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+        obs = payload.get('observations', [])
+        if not obs:
+            return None
+        rows = []
+        for row in obs:
+            v = row.get('value')
+            if v in (None, '.', ''):
+                continue
+            rows.append((pd.to_datetime(row['date']), float(v)))
+        if not rows:
+            return None
+        s = pd.Series({d: v for d, v in rows}).sort_index()
+        return _to_price_frame_from_series(s)
+    except Exception:
+        return None
+
+
+def _fetch_first_valid_fred_series(series_candidates, start_date, end_date):
+    for sid in series_candidates:
+        df = _fetch_fred_series(sid, start_date, end_date)
+        if df is not None and not df.empty:
+            return sid, df
+    return None, None
+
+
+def _ecos_date_str(dt, cycle):
+    ts = pd.Timestamp(dt)
+    if cycle == 'A':
+        return ts.strftime('%Y')
+    if cycle == 'Q':
+        q = (ts.month - 1) // 3 + 1
+        return f"{ts.year}Q{q}"
+    if cycle == 'M':
+        return ts.strftime('%Y%m')
+    return ts.strftime('%Y%m%d')
+
+
+def _fetch_ecos_series(stat_code, cycle, item_code, start_date, end_date):
+    api_key = _get_secret_value(PUBLIC_DATA_SETTINGS['ecos_env_keys'])
+    if not api_key or not PUBLIC_DATA_SETTINGS.get('use_ecos', True):
+        return None
+    start_s = _ecos_date_str(start_date, cycle)
+    end_s = _ecos_date_str(end_date, cycle)
+    path = f'https://ecos.bok.or.kr/api/StatisticSearch/{api_key}/json/kr/1/100000/{stat_code}/{cycle}/{start_s}/{end_s}/{item_code}'
+    try:
+        resp = requests.get(path, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload.get('StatisticSearch', {}).get('row', [])
+        if not rows:
+            return None
+        parsed = []
+        for row in rows:
+            time_raw = str(row.get('TIME', ''))
+            val_raw = row.get('DATA_VALUE')
+            if val_raw in (None, '', '.'):
+                continue
+            if cycle == 'M' and len(time_raw) == 6:
+                dt = pd.to_datetime(time_raw + '01', format='%Y%m%d')
+            elif cycle == 'Q' and 'Q' in time_raw:
+                yr, q = time_raw.split('Q')
+                month = (int(q) - 1) * 3 + 1
+                dt = pd.Timestamp(int(yr), month, 1)
+            elif cycle == 'A' and len(time_raw) == 4:
+                dt = pd.Timestamp(int(time_raw), 1, 1)
             else:
-                dates = ref_df.index
-            if len(dates) == 0: return None
-            annual_rate = config.get('annual_rate', 0.025)
-            daily_rate = (1 + annual_rate) ** (1/252) - 1
-            base_price = 10000.0
-            prices = [base_price]
-            for i in range(1, len(dates)):
-                prices.append(prices[-1] * (1 + daily_rate))
-            return pd.DataFrame({'Close': prices, 'Adj Close': prices}, index=dates)
-        
-        elif config['type'] == 'kr_etf':
-            df = fdr.DataReader(config['ticker'], start_date, end_date)
-            if df is None or df.empty: return None
-            df = df[~df.index.duplicated(keep='last')].sort_index()
-            if 'Close' not in df.columns: return None
-            return df
-        
-        elif config['type'] == 'kr_etf_duration_adjusted':
-            df = fdr.DataReader(config['ticker'], start_date, end_date)
-            if df is None or df.empty: return None
-            df = df[~df.index.duplicated(keep='last')].sort_index()
-            if 'Close' not in df.columns: return None
-            factor = config.get('duration_factor', KR_BOND_DURATION_FACTOR)
+                dt = pd.to_datetime(time_raw)
+            parsed.append((dt, float(val_raw)))
+        if not parsed:
+            return None
+        s = pd.Series({d: v for d, v in parsed}).sort_index()
+        return _to_price_frame_from_series(s)
+    except Exception:
+        return None
+
+
+def _fetch_first_valid_ecos_item(stat_code, cycle, item_code_candidates, start_date, end_date):
+    for code in item_code_candidates:
+        df = _fetch_ecos_series(stat_code, cycle, code, start_date, end_date)
+        if df is not None and not df.empty:
+            return code, df
+    return None, None
+
+
+def _fetch_first_valid_ticker(ticker_candidates, start_date, end_date):
+    for ticker in ticker_candidates:
+        try:
+            df = fdr.DataReader(ticker, start_date, end_date)
+            df = _standardize_price_frame(df)
+            if df is not None and not df.empty:
+                return ticker, df
+        except Exception:
+            continue
+    return None, None
+
+
+def _build_synthetic_cash_from_rate(rate_df, base_price=10000.0):
+    rate_df = _standardize_price_frame(rate_df)
+    if rate_df is None or rate_df.empty:
+        return None
+    y = (rate_df['Close'].astype(float) / 100.0).clip(lower=0.0).ffill().bfill()
+    daily_ret = (y.shift(1).fillna(y) / 252.0).clip(-0.001, 0.001)
+    price = (1.0 + daily_ret).cumprod() * base_price
+    out = pd.DataFrame(index=rate_df.index)
+    out['Close'] = price
+    out['Adj Close'] = price
+    return out
+
+
+def _build_total_return_from_yield(yield_df, duration, base_price=10000.0, fx_df=None):
+    yield_df = _standardize_price_frame(yield_df)
+    if yield_df is None or yield_df.empty:
+        return None
+
+    y = (yield_df['Close'].astype(float) / 100.0).ffill().bfill()
+    dy = y.diff().fillna(0.0)
+
+    carry = (y.shift(1).fillna(y) / 252.0).clip(lower=-0.001, upper=0.0015)
+    price_ret = (-duration * dy).clip(-MAX_SYNTH_DAILY_MOVE, MAX_SYNTH_DAILY_MOVE)
+    convexity = 0.5 * (duration ** 2) * (dy ** 2)
+    total_ret = (carry + price_ret + convexity).clip(-MAX_SYNTH_DAILY_MOVE, MAX_SYNTH_DAILY_MOVE)
+
+    price = (1.0 + total_ret).cumprod() * base_price
+    out = pd.DataFrame(index=yield_df.index)
+    out['Close'] = price
+    out['Adj Close'] = price
+
+    if fx_df is not None:
+        fx_df = _standardize_price_frame(fx_df)
+        if fx_df is None or fx_df.empty:
+            return None
+        merged = pd.concat([out['Close'], fx_df['Close']], axis=1, keys=['LOCAL', 'FX']).ffill().bfill().dropna()
+        out = pd.DataFrame(index=merged.index)
+        out['Close'] = merged['LOCAL'] * merged['FX']
+        out['Adj Close'] = out['Close']
+    return out
+
+
+def _load_proxy_step(step, start_date, end_date):
+    stype = step['type']
+
+    if stype == 'synthetic_cash':
+        ref_df = fdr.DataReader('069500', start_date, end_date)
+        ref_df = _standardize_price_frame(ref_df)
+        if ref_df is None or ref_df.empty:
+            dates = pd.bdate_range(start=start_date, end=end_date)
+        else:
+            dates = ref_df.index
+        if len(dates) == 0:
+            return None
+        annual_rate = step.get('annual_rate', 0.025)
+        daily_rate = (1 + annual_rate) ** (1/252) - 1
+        base_price = 10000.0
+        prices = [base_price]
+        for _ in range(1, len(dates)):
+            prices.append(prices[-1] * (1 + daily_rate))
+        return pd.DataFrame({'Close': prices, 'Adj Close': prices}, index=dates)
+
+    if stype in ('kr_etf', 'kr_stock', 'kr_index'):
+        try:
+            return _standardize_price_frame(fdr.DataReader(step['ticker'], start_date, end_date))
+        except Exception:
+            return None
+
+    if stype == 'kr_etf_duration_adjusted':
+        try:
+            df = _standardize_price_frame(fdr.DataReader(step['ticker'], start_date, end_date))
+            if df is None or df.empty:
+                return None
+            factor = step.get('duration_factor', KR_BOND_DURATION_FACTOR)
             close = df['Close'].copy()
             daily_returns = close.pct_change().fillna(0.0)
             adjusted_returns = (daily_returns * factor).clip(-0.10, 0.10)
@@ -215,23 +504,104 @@ def fetch_proxy_data(asset_name, start_date, end_date):
             result_df['Close'] = synthetic_price
             result_df['Adj Close'] = synthetic_price
             return result_df
-        
-        elif config['type'] == 'us_etf_fx':
-            us_df = fdr.DataReader(config['ticker'], start_date, end_date)
-            fx_df = fdr.DataReader(config['fx'], start_date, end_date)
+        except Exception:
+            return None
+
+    if stype == 'us_etf_fx':
+        try:
+            us_df = fdr.DataReader(step['ticker'], start_date, end_date)
+            fx_df = fdr.DataReader(step.get('fx', 'USD/KRW'), start_date, end_date)
+            us_df = _standardize_price_frame(us_df)
+            fx_df = _standardize_price_frame(fx_df)
             if us_df is None or us_df.empty or fx_df is None or fx_df.empty:
                 return None
-            us_df = us_df[~us_df.index.duplicated(keep='last')]
-            fx_df = fx_df[~fx_df.index.duplicated(keep='last')]
             us_close = us_df['Adj Close'] if 'Adj Close' in us_df.columns else us_df['Close']
-            fx_close = fx_df['Close']
-            merged = pd.concat([us_close, fx_close], axis=1, keys=['US', 'FX'])
-            merged = merged.ffill().bfill().dropna()
+            merged = pd.concat([us_close, fx_df['Close']], axis=1, keys=['US', 'FX']).ffill().bfill().dropna()
             synthetic_df = pd.DataFrame(index=merged.index)
             synthetic_df['Close'] = merged['US'] * merged['FX']
             synthetic_df['Adj Close'] = synthetic_df['Close']
             return synthetic_df
-        return None
+        except Exception:
+            return None
+
+    if stype == 'commodity_fx':
+        try:
+            cmd_df = _standardize_price_frame(fdr.DataReader(step['ticker'], start_date, end_date))
+            fx_df = _standardize_price_frame(fdr.DataReader(step.get('fx', 'USD/KRW'), start_date, end_date))
+            if cmd_df is None or cmd_df.empty or fx_df is None or fx_df.empty:
+                return None
+            merged = pd.concat([cmd_df['Close'], fx_df['Close']], axis=1, keys=['CMD', 'FX']).ffill().bfill().dropna()
+            out = pd.DataFrame(index=merged.index)
+            out['Close'] = merged['CMD'] * merged['FX']
+            out['Adj Close'] = out['Close']
+            return out
+        except Exception:
+            return None
+
+    if stype == 'ecos_yield_total_return':
+        _, ydf = _fetch_first_valid_ecos_item(step['stat_code'], step.get('cycle', 'DD'), step['item_code_candidates'], start_date, end_date)
+        return _build_total_return_from_yield(ydf, duration=step.get('duration', KR_LONG_BOND_DURATION))
+
+    if stype == 'fred_yield_total_return_fx':
+        _, ydf = _fetch_first_valid_fred_series(step['series_candidates'], start_date, end_date)
+        try:
+            fx_df = _standardize_price_frame(fdr.DataReader(step.get('fx', 'USD/KRW'), start_date, end_date))
+        except Exception:
+            fx_df = None
+        return _build_total_return_from_yield(ydf, duration=step.get('duration', US_LONG_BOND_DURATION), fx_df=fx_df)
+
+    if stype == 'kr_yield_total_return':
+        _, ydf = _fetch_first_valid_ticker(step['ticker_candidates'], start_date, end_date)
+        return _build_total_return_from_yield(ydf, duration=step.get('duration', KR_LONG_BOND_DURATION))
+
+    if stype == 'us_yield_total_return_fx':
+        _, ydf = _fetch_first_valid_ticker(step['ticker_candidates'], start_date, end_date)
+        try:
+            fx_df = _standardize_price_frame(fdr.DataReader(step.get('fx', 'USD/KRW'), start_date, end_date))
+        except Exception:
+            fx_df = None
+        return _build_total_return_from_yield(ydf, duration=step.get('duration', US_LONG_BOND_DURATION), fx_df=fx_df)
+
+    if stype == 'ecos_short_rate_cash':
+        _, rate_df = _fetch_first_valid_ecos_item(step['stat_code'], step.get('cycle', 'DD'), step['item_code_candidates'], start_date, end_date)
+        return _build_synthetic_cash_from_rate(rate_df)
+
+    if stype == 'kr_short_rate_cash':
+        _, rate_df = _fetch_first_valid_ticker(step['ticker_candidates'], start_date, end_date)
+        return _build_synthetic_cash_from_rate(rate_df)
+
+    return None
+
+
+@st.cache_data(ttl=3600)
+def fetch_proxy_data(asset_name, start_date, end_date):
+    try:
+        if asset_name == CASH_NAME:
+            steps = LONG_HISTORY_CASH_STEPS
+        else:
+            steps = LONG_HISTORY_PROXY_STEPS.get(asset_name)
+
+        if steps:
+            built = []
+            for step in steps:
+                step_df = _load_proxy_step(step, start_date, end_date)
+                if step_df is not None and not step_df.empty:
+                    built.append(step_df)
+            if built:
+                combined = built[0]
+                for nxt in built[1:]:
+                    combined = _chain_link_series(combined, nxt)
+                return combined
+
+        # 아래는 예전 단순 프록시 로직 백업
+        if asset_name == CASH_NAME:
+            config = PROXY_CASH
+        else:
+            config = PROXY_ASSETS.get(asset_name)
+        if config is None:
+            return None
+
+        return _load_proxy_step(config, start_date, end_date)
     except Exception as e:
         st.warning(f"프록시 데이터 로딩 오류 ({asset_name}): {str(e)}")
         return None
@@ -352,6 +722,63 @@ def _chain_link_series(proxy_df, etf_df):
     combined = pd.concat([before, etf_clean]).sort_index()
     combined = combined[~combined.index.duplicated(keep='last')]
     return combined
+
+
+def _calc_overlap_diagnostics(proxy_df, etf_df):
+    proxy_df = _standardize_price_frame(proxy_df)
+    etf_df = _standardize_price_frame(etf_df)
+    if proxy_df is None or proxy_df.empty or etf_df is None or etf_df.empty:
+        return None
+    overlap = pd.concat([proxy_df['Adj Close'].rename('proxy'), etf_df['Adj Close'].rename('etf')], axis=1).dropna()
+    if len(overlap) < 10:
+        return {
+            'overlap_days': int(len(overlap)),
+            'return_corr': None,
+            'level_ratio_median': None,
+            'tracking_error_ann': None,
+        }
+    pret = overlap['proxy'].pct_change().dropna()
+    eret = overlap['etf'].pct_change().dropna()
+    common = pd.concat([pret.rename('proxy_r'), eret.rename('etf_r')], axis=1).dropna()
+    corr = common['proxy_r'].corr(common['etf_r']) if len(common) >= 10 else None
+    te = (common['proxy_r'] - common['etf_r']).std() * np.sqrt(252) if len(common) >= 10 else None
+    ratio = (overlap['etf'] / overlap['proxy']).replace([np.inf, -np.inf], np.nan).dropna()
+    return {
+        'overlap_days': int(len(overlap)),
+        'return_corr': None if corr is None or pd.isna(corr) else float(corr),
+        'level_ratio_median': None if ratio.empty else float(ratio.median()),
+        'tracking_error_ann': None if te is None or pd.isna(te) else float(te),
+    }
+
+
+def build_proxy_diagnostics(start_date, end_date):
+    rows = []
+    for name, ticker in ASSETS.items():
+        proxy_df = fetch_proxy_data(name, start_date, end_date)
+        etf_df = fetch_etf_data(ticker, start_date, end_date, is_momentum=False)
+        diag = _calc_overlap_diagnostics(proxy_df, etf_df)
+        rows.append({
+            '자산': name,
+            '프록시 시작': proxy_df.index.min().strftime('%Y-%m-%d') if proxy_df is not None and len(proxy_df) > 0 else '없음',
+            'ETF 시작': etf_df.index.min().strftime('%Y-%m-%d') if etf_df is not None and len(etf_df) > 0 else '없음',
+            '중첩일수': diag['overlap_days'] if diag else 0,
+            '수익률 상관': round(diag['return_corr'], 3) if diag and diag['return_corr'] is not None else None,
+            '연환산 추적오차': round(diag['tracking_error_ann'] * 100, 2) if diag and diag['tracking_error_ann'] is not None else None,
+            '레벨비율 중앙값': round(diag['level_ratio_median'], 4) if diag and diag['level_ratio_median'] is not None else None,
+        })
+    proxy_cash = fetch_proxy_data(CASH_NAME, start_date, end_date)
+    etf_cash = fetch_etf_data(CASH_TICKER, start_date, end_date, is_momentum=False)
+    diag = _calc_overlap_diagnostics(proxy_cash, etf_cash)
+    rows.append({
+        '자산': CASH_NAME,
+        '프록시 시작': proxy_cash.index.min().strftime('%Y-%m-%d') if proxy_cash is not None and len(proxy_cash) > 0 else '없음',
+        'ETF 시작': etf_cash.index.min().strftime('%Y-%m-%d') if etf_cash is not None and len(etf_cash) > 0 else '없음',
+        '중첩일수': diag['overlap_days'] if diag else 0,
+        '수익률 상관': round(diag['return_corr'], 3) if diag and diag['return_corr'] is not None else None,
+        '연환산 추적오차': round(diag['tracking_error_ann'] * 100, 2) if diag and diag['tracking_error_ann'] is not None else None,
+        '레벨비율 중앙값': round(diag['level_ratio_median'], 4) if diag and diag['level_ratio_median'] is not None else None,
+    })
+    return pd.DataFrame(rows)
 
 
 def _load_hybrid_data(start_date, end_date):
@@ -1187,19 +1614,27 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.markdown("---")
     
     with st.expander("📌 장기 백테스트: 하이브리드 데이터 안내", expanded=False):
-        st.markdown(
-            "ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 사용합니다.\n\n"
-            "| 자산 | 프록시 (상장 전) | 상장 후 |\n"
-            "|---|---|---|\n"
-            "| 코스피200 | KODEX 200 (069500) | 실제 ETF (294400) |\n"
-            "| 미국나스닥100 | QQQ × USD/KRW | TIGER 미국나스닥100 (133690) |\n"
-            f"| 한국채30년 | KOSEF 국고채10년 × {KR_BOND_DURATION_FACTOR}배 | 실제 ETF (439870) |\n"
-            "| 미국채30년 | TLT × USD/KRW | 실제 ETF (476760) |\n"
-            "| 금현물 | GLD × USD/KRW | ACE KRX금현물 (411060) |\n"
-            "| 현금 | 합성 (연 2.5%) | 실제 MMF ETF (455890) |\n\n"
-            "💡 **체인링크**: 프록시 → ETF 전환 시점에서 가격을 연결하여 수익률 연속성을 유지합니다.\n\n"
-            "⚠️ 최근 기간의 모멘텀/기여도는 실제 ETF 데이터 기반으로 정확합니다."
-        )
+        st.markdown(f"""
+ETF 상장 전 기간은 프록시, **상장 후는 실제 ETF 데이터**를 사용합니다.
+
+가능하면 공식 공개 데이터(FRED/ECOS)를 먼저 쓰고, 키가 없거나 호출이 안 되면 FDR/ETF 프록시로 자동 폴백합니다.
+
+| 자산 | 장기 프록시 사다리 | 상장 후 |
+|---|---|---|
+| 코스피200 | KS200 지수 → KODEX 200 (069500) | 실제 ETF (294400) |
+| 미국나스닥100 | QQQ × USD/KRW | TIGER 미국나스닥100 (133690) |
+| 한국채30년 | ECOS 장기국고채 수익률 기반 총수익 → FDR 금리 프록시 → KOSEF 국고채10년 × {KR_BOND_DURATION_FACTOR}배 | 실제 ETF (439870) |
+| 미국채30년 | FRED 장기금리 기반 총수익 × USD/KRW → FDR 금리 프록시 → TLT × USD/KRW | 실제 ETF (476760) |
+| 금현물 | COMEX 금 선물 × USD/KRW → GLD × USD/KRW | ACE KRX금현물 (411060) |
+| 현금 | ECOS 단기금리 기반 합성 현금 → KR1Y 금리 → 연 2.5% 보조 프록시 | 실제 MMF ETF (455890) |
+
+💡 **체인링크**: 프록시 → ETF 전환 시점에서 가격을 연결하여 수익률 연속성을 유지합니다.
+
+⚠️ 2000년대 초반 결과는 '장기 프록시 기반 참고 구간'이며, ETF 기반 신뢰도는 최근 구간이 더 높습니다.
+""")
+
+    src_status = _public_source_status()
+    st.caption(f"공개 데이터 키 상태 — FRED: {'연결됨' if src_status['fred_key'] else '없음(폴백 사용)'} | ECOS: {'연결됨' if src_status['ecos_key'] else '없음(폴백 사용)'}")
 
     data_start = bt_start_date - relativedelta(months=18)
     with st.spinner("시장 데이터 로딩 중... (하이브리드: 프록시+실제ETF, 최초 로딩 시 시간 소요)"):
@@ -1221,6 +1656,11 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.text(f"  {BENCHMARK_ETF['name']}: {benchmark_raw.index.min().strftime('%Y-%m-%d')} ~ {benchmark_raw.index.max().strftime('%Y-%m-%d')}")
         else:
             st.text(f"  {BENCHMARK_ETF['name']} ({BENCHMARK_ETF['ticker']}): ❌ 데이터 없음 (펀드코드가 FDR 미지원일 수 있음)")
+
+    with st.expander("🧪 프록시-ETF 연결 검증표", expanded=False):
+        diag_df = build_proxy_diagnostics(data_start, current_date)
+        st.dataframe(diag_df, use_container_width=True, hide_index=True)
+        st.caption("수익률 상관이 높고, 추적오차가 낮을수록 연결 품질이 좋습니다. 2000년대 초반은 참고 구간으로 보세요.")
 
     st.subheader("📋 현재 시장 신호 및 Faber A 추천 비중")
     st.caption("💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. 금현물은 GLD×환율 기준.")
@@ -2341,6 +2781,9 @@ def mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_ca
     st.caption("Faber A 실제 월별 수익률을 부트스트랩하여 미래 경로를 시뮬레이션합니다.")
     
     # 데이터 로딩 + Faber A 시뮬레이션
+    src_status = _public_source_status()
+    st.caption(f"공개 데이터 키 상태 — FRED: {'연결됨' if src_status['fred_key'] else '없음(폴백 사용)'} | ECOS: {'연결됨' if src_status['ecos_key'] else '없음(폴백 사용)'}")
+
     data_start = bt_start_date - relativedelta(months=18)
     with st.spinner("📊 Faber A 백테스트 실행 중..."):
         all_data = load_market_data(data_start, current_date, hybrid=True)
@@ -2525,7 +2968,7 @@ def main():
         hist_profit = st.number_input("과거 누적 실현손익", value=DEFAULT_HISTORICAL_REALIZED_PROFIT, step=100000)
         st.markdown(f"**확인:** {hist_profit:,.0f}원")
         bt_start_date = datetime.combine(st.date_input("백테스트 시작일", DEFAULT_BACKTEST_START_DATE,
-            help="5자산 풀가동: 2013년 6월~. 사이드바에서 조정 가능."), datetime.min.time())
+            help="공개 데이터(FRED/ECOS) 키가 있으면 더 높은 질의 2000년 장기 백테스트가 가능합니다. 최근 ETF 구간이 가장 신뢰도가 높습니다."), datetime.min.time())
     st.sidebar.markdown("---")
 
     with st.sidebar.expander("🥇 금 괴리율 차익거래 계산기", expanded=False):
