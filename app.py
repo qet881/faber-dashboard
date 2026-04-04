@@ -697,19 +697,46 @@ def _chain_link_series(proxy_df, etf_df):
     
     # ETF 데이터 시작일(링크 기준 컬럼 유효 시작)
     etf_start = etf_clean[col].dropna().index.min()
-    
-    # 스케일링 비율: ETF 초기 5거래일의 중앙값
-    early_etf = etf_clean.head(5)
+    if etf_start is None or pd.isna(etf_start):
+        return proxy_clean
+
+    # 1) 겹치는 날짜가 있으면 해당 구간의 레벨 비율 중앙값 사용(가장 안정적)
+    overlap = pd.concat(
+        [proxy_clean[col].rename('proxy'), etf_clean[col].rename('etf')],
+        axis=1
+    ).dropna()
     ratios = []
-    for d in early_etf.index:
-        ep = float(early_etf.loc[d, col])
-        pp = proxy_clean[col].asof(d)
-        if pd.notna(pp) and pp > 0 and ep > 0:
-            ratios.append(ep / pp)
-    
+    if not overlap.empty:
+        lvl_ratio = (overlap['etf'] / overlap['proxy']).replace([np.inf, -np.inf], np.nan).dropna()
+        if not lvl_ratio.empty:
+            ratios = lvl_ratio.tail(20).tolist()
+
+    # 2) 겹침이 부족하면 ETF 시작 초반(최대 5일) vs proxy asof로 보완.
+    #    단, proxy 값이 너무 오래된(stale) 경우는 제외하여 비정상 점프 방지.
     if len(ratios) == 0:
-        return etf_clean
-    
+        early_etf = etf_clean.loc[etf_start:].head(5)
+        for d in early_etf.index:
+            ep = float(early_etf.loc[d, col])
+            pp = proxy_clean[col].asof(d)
+            if pd.isna(pp) or pp <= 0 or ep <= 0:
+                continue
+            proxy_idx = proxy_clean.index.asof(d)
+            if proxy_idx is None or pd.isna(proxy_idx):
+                continue
+            stale_days = len(pd.bdate_range(proxy_idx, d)) - 1
+            if stale_days > 5:
+                continue
+            ratios.append(ep / pp)
+
+    # 3) 여전히 없으면 마지막 proxy와 첫 ETF를 직접 연결(연속성 우선)
+    if len(ratios) == 0:
+        last_proxy = proxy_clean[col].dropna().iloc[-1] if len(proxy_clean[col].dropna()) > 0 else np.nan
+        first_etf = etf_clean.loc[etf_start, col]
+        if pd.notna(last_proxy) and last_proxy > 0 and pd.notna(first_etf) and first_etf > 0:
+            ratios = [float(first_etf) / float(last_proxy)]
+        else:
+            return etf_clean
+
     ratio = float(np.median(ratios))
     
     # 프록시 가격 스케일링
