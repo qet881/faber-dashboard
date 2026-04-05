@@ -180,11 +180,9 @@ def fetch_proxy_data(asset_name, start_date, end_date):
         if config is None: return None
         
         if config['type'] == 'synthetic_cash':
-            ref_df = fdr.DataReader('069500', start_date, end_date)
-            if ref_df is None or ref_df.empty:
-                dates = pd.bdate_range(start=start_date, end=end_date)
-            else:
-                dates = ref_df.index
+            # 2000-01-01부터 영업일 기준으로 합성 현금을 생성한다.
+            # KODEX200 데이터 존재 여부와 무관하게 pd.bdate_range를 직접 사용.
+            dates = pd.bdate_range(start=start_date, end=end_date)
             if len(dates) == 0: return None
             annual_rate = config.get('annual_rate', 0.025)
             daily_rate = (1 + annual_rate) ** (1/252) - 1
@@ -274,7 +272,7 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
         end_str = pd.Timestamp(end_date).strftime('%Y%m%d')
         url = (
             f"https://ecos.bok.or.kr/api/StatisticSearch/{api_key}/json/kr"
-            f"/1/10000/817Y002/DD/{start_str}/{end_str}/010200000"
+            f"/1/100000/817Y002/DD/{start_str}/{end_str}/010200000"
         )
         resp = _requests.get(url, timeout=30)
         resp.raise_for_status()
@@ -363,8 +361,9 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_gold_fred(start_date, end_date):
-    """FRED 금현물(GOLDAMGBD228NLBM) × USD/KRW → KRW 가격 딥프록시 (2000-01-01~).
+    """FRED 금현물 × USD/KRW → KRW 가격 딥프록시 (2000-01-01~).
     GLD 상장 전(2004-11-18) 구간 커버.
+    시리즈 우선순위: GOLDAMGBD228NLBM(AM 고정가) → GOLDPMGBD228NLBM(PM 고정가) 순으로 시도.
     """
     try:
         from fredapi import Fred
@@ -375,10 +374,18 @@ def fetch_deep_proxy_gold_fred(start_date, end_date):
         fred = Fred(api_key=fred_api_key)
         start_ts = pd.Timestamp(start_date)
         end_ts = pd.Timestamp(end_date)
-        gold_raw = fred.get_series('GOLDAMGBD228NLBM', observation_start=start_ts, observation_end=end_ts)
+        gold_raw = None
+        for series_id in ('GOLDAMGBD228NLBM', 'GOLDPMGBD228NLBM'):
+            try:
+                s = fred.get_series(series_id, observation_start=start_ts, observation_end=end_ts)
+                if s is not None and not s.empty and s.dropna().shape[0] > 0:
+                    gold_raw = s.dropna()
+                    break
+            except Exception:
+                continue
         if gold_raw is None or gold_raw.empty:
+            st.warning("FRED 금 시리즈(GOLDAMGBD228NLBM / GOLDPMGBD228NLBM) 데이터를 가져올 수 없습니다.")
             return None
-        gold_raw = gold_raw.dropna()
         usdkrw_df = fdr.DataReader('USD/KRW', start_date, end_date)
         if usdkrw_df is None or usdkrw_df.empty:
             return None
@@ -465,51 +472,87 @@ def load_market_data(start_date, end_date, use_proxy=False, hybrid=False):
 def _chain_link_series(proxy_df, etf_df):
     """프록시 → 실제 ETF 체인링크.
     Close와 Adj Close만 포함하는 통일된 DataFrame을 반환.
+
+    스케일링 방식:
+    - ETF 초기 최대 20거래일의 ratio(ETF가격/프록시가격) 중앙값 사용.
+    - 이상치 비율(ratio가 중앙값의 ±50% 초과)은 계산에서 제외.
+    - 연결 시점 전후 수익률 연속성 검증: 연결 직전/직후 1일 수익률 차이가
+      10%p를 넘으면 경고를 출력(graceful — 데이터는 그대로 반환).
     """
     if proxy_df is None or proxy_df.empty:
         return etf_df
     if etf_df is None or etf_df.empty:
         return proxy_df
-    
+
     col = 'Close'
     if col not in proxy_df.columns or col not in etf_df.columns:
         return etf_df if etf_df is not None else proxy_df
-    
+
     # ETF DataFrame을 Close/Adj Close만 남기고 정리
     etf_clean = pd.DataFrame(index=etf_df.index)
-    etf_clean['Close'] = etf_df['Close']
-    etf_clean['Adj Close'] = etf_df['Adj Close'] if 'Adj Close' in etf_df.columns else etf_df['Close']
-    
+    etf_clean['Close'] = etf_df['Close'].astype(float)
+    etf_clean['Adj Close'] = (
+        etf_df['Adj Close'].astype(float) if 'Adj Close' in etf_df.columns
+        else etf_df['Close'].astype(float)
+    )
+
     # 프록시도 동일하게 정리
     proxy_clean = pd.DataFrame(index=proxy_df.index)
-    proxy_clean['Close'] = proxy_df['Close']
-    proxy_clean['Adj Close'] = proxy_df['Adj Close'] if 'Adj Close' in proxy_df.columns else proxy_df['Close']
-    
+    proxy_clean['Close'] = proxy_df['Close'].astype(float)
+    proxy_clean['Adj Close'] = (
+        proxy_df['Adj Close'].astype(float) if 'Adj Close' in proxy_df.columns
+        else proxy_df['Close'].astype(float)
+    )
+
     # ETF 데이터 시작일
     etf_start = etf_clean.index.min()
-    
-    # 스케일링 비율: ETF 초기 5거래일의 중앙값
-    early_etf = etf_clean.head(5)
+
+    # 스케일링 비율: ETF 초기 최대 20거래일의 중앙값
+    early_etf = etf_clean.head(20)
     ratios = []
     for d in early_etf.index:
         ep = float(early_etf.loc[d, col])
         pp = proxy_clean[col].asof(d)
         if pd.notna(pp) and pp > 0 and ep > 0:
             ratios.append(ep / pp)
-    
+
     if len(ratios) == 0:
         return etf_clean
-    
-    ratio = float(np.median(ratios))
-    
+
+    # 1차 중앙값으로 이상치 필터링 후 재계산
+    median_ratio = float(np.median(ratios))
+    filtered = [r for r in ratios if 0.5 * median_ratio <= r <= 1.5 * median_ratio]
+    ratio = float(np.median(filtered)) if filtered else median_ratio
+
     # 프록시 가격 스케일링
-    proxy_clean['Close'] = proxy_clean['Close'] * ratio
-    proxy_clean['Adj Close'] = proxy_clean['Adj Close'] * ratio
-    
+    proxy_scaled = proxy_clean.copy()
+    proxy_scaled['Close'] = proxy_scaled['Close'] * ratio
+    proxy_scaled['Adj Close'] = proxy_scaled['Adj Close'] * ratio
+
     # ETF 시작 전은 스케일링된 프록시, 이후는 실제 ETF
-    before = proxy_clean[proxy_clean.index < etf_start]
+    before = proxy_scaled[proxy_scaled.index < etf_start]
     combined = pd.concat([before, etf_clean]).sort_index()
     combined = combined[~combined.index.duplicated(keep='last')]
+
+    # ── 연결 시점 수익률 연속성 검증 ──────────────────────────
+    # 연결 경계 전후 각 1개 행을 꺼내 수익률 점프 여부를 확인한다.
+    try:
+        boundary_rows = combined[col].loc[
+            (combined.index >= etf_start - pd.Timedelta(days=10)) &
+            (combined.index <= etf_start + pd.Timedelta(days=10))
+        ]
+        if len(boundary_rows) >= 2:
+            boundary_ret = boundary_rows.pct_change().dropna().abs()
+            max_jump = float(boundary_ret.max())
+            if max_jump > 0.10:
+                st.warning(
+                    f"⚠️ 체인링크 연결 시점({etf_start.date()}) 근방에서 "
+                    f"수익률 점프 감지: 최대 {max_jump*100:.1f}%. "
+                    "ratio 재계산에도 불구하고 완전히 제거되지 않을 수 있습니다."
+                )
+    except Exception:
+        pass
+
     return combined
 
 
