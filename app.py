@@ -643,15 +643,25 @@ def _fetch_slot_proxy(slot_config, start_date, end_date):
 
 
 def build_slot_strategy_data(base_all_data, kr_slot_name, us_slot_name, start_date, end_date):
-    """기존 all_data에서 한국주식/미국주식 슬롯만 교체한 데이터 생성."""
+    """기존 all_data에서 한국주식/미국주식 슬롯만 교체한 데이터 생성.
+
+    한국주식 슬롯은 3계층 체인링크로 2000-01-01부터 통일:
+      KS11 딥프록시 → 슬롯 프록시 → 실제 ETF
+    코스피200 슬롯은 base_all_data에 이미 3계층이 적용되어 있으므로 그대로 사용.
+    """
     vdata = {k: v for k, v in base_all_data.items()}
-    
+
     # 한국주식 슬롯 교체
     if kr_slot_name != '코스피200':  # 기존과 다를 때만
         kr_cfg = KR_STOCK_SLOTS[kr_slot_name]
+        # 1계층: KS11 딥프록시 (2000-01-01~)
+        deep_kospi = fetch_deep_proxy_kospi(start_date, end_date)
+        # 2계층: 슬롯 자체 프록시 (상장일~)
         kr_proxy = _fetch_slot_proxy(kr_cfg, start_date, end_date)
+        # 3계층: 실제 ETF
         kr_etf = fetch_etf_data(kr_cfg['etf'], start_date, end_date, is_momentum=False)
-        kr_data = _chain_link_series(kr_proxy, kr_etf)
+        step1 = _chain_link_series(deep_kospi, kr_proxy)
+        kr_data = _chain_link_series(step1, kr_etf)
         if kr_data is None or kr_data.empty: return None
         vdata['코스피200'] = kr_data
         vdata['코스피200_모멘텀'] = kr_data
