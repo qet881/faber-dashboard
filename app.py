@@ -1566,7 +1566,43 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         monthly_peak_date=s_m_peak, monthly_valley_date=s_m_valley, monthly_mdd_val=s_m_mdd_val,
         extra_navs=extra)
     st.plotly_chart(fig, use_container_width=True)
-    
+
+    # ── 정량 비교 테이블 ─────────────────────────────────────
+    st.markdown("#### 📐 전략 정량 비교")
+
+    def _strategy_metrics(nav, ic):
+        """nav DataFrame에서 CAGR/MDD/Sharpe/Sortino를 딕셔너리로 반환."""
+        if nav is None or nav.empty:
+            return None
+        _, _, mdd, cagr = calculate_performance_metrics(nav, ic)
+        sharpe  = calculate_sharpe_ratio(nav)
+        sortino = calculate_sortino_ratio(nav)
+        cagr_mdd = (cagr / abs(mdd)) if (mdd is not None and mdd < 0) else None
+        return {"cagr": cagr, "mdd": mdd, "sharpe": sharpe,
+                "sortino": sortino, "cagr_mdd": cagr_mdd}
+
+    def _fmt(v, fmt):
+        return fmt.format(v) if v is not None else "-"
+
+    m_faber = _strategy_metrics(nav_df, IC)
+    m_old   = _strategy_metrics(old_nav, IC) if old_nav is not None else None
+
+    comparison_rows = [
+        ("CAGR",        _fmt(m_faber["cagr"]    if m_faber else None, "{:.2%}"),
+                        _fmt(m_old["cagr"]       if m_old   else None, "{:.2%}")),
+        ("MDD (일별)",  _fmt(m_faber["mdd"]      if m_faber else None, "{:.2%}"),
+                        _fmt(m_old["mdd"]        if m_old   else None, "{:.2%}")),
+        ("Sharpe",      _fmt(m_faber["sharpe"]   if m_faber else None, "{:.2f}"),
+                        _fmt(m_old["sharpe"]     if m_old   else None, "{:.2f}")),
+        ("Sortino",     _fmt(m_faber["sortino"]  if m_faber else None, "{:.2f}"),
+                        _fmt(m_old["sortino"]    if m_old   else None, "{:.2f}")),
+        ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"] if m_faber else None, "{:.2f}"),
+                        _fmt(m_old["cagr_mdd"]   if m_old   else None, "{:.2f}")),
+    ]
+
+    df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
+    st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+
     # Faber A 월별 비중 변화
     st.markdown("---")
     st.subheader("📊 Faber A 월별 자산 배분 비중")
