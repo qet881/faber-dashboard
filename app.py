@@ -258,49 +258,39 @@ def fetch_deep_proxy_kospi(start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
-    """ECOS API 국고채10년 수익률 → 30년채 합성가격 딥프록시 (2000-01-01~).
+    """FRED IRLTLT01KRM156N(한국 장기금리 월별) → 30년채 합성가격 딥프록시 (2000-01-01~).
     KOSEF국고채10년(148070) 상장 전(2009-08-27) 구간 커버.
     듀레이션 배수(KR_BOND_DURATION_FACTOR=2.5) 적용.
+    ※ 과거 ECOS API 방식에서 FRED로 대체.
     """
     try:
-        import requests as _requests
-        api_key = st.secrets.get("ECOS_API_KEY", "")
-        if not api_key:
-            st.warning("ECOS_API_KEY가 Secrets에 없습니다. 한국채30년 딥프록시 건너뜀.")
+        from fredapi import Fred
+        try:
+            fred_key = st.secrets["FRED_API_KEY"]
+            fred = Fred(api_key=fred_key)
+        except Exception:
+            fred = None
+            st.warning("FRED API 키 없음 — 한국채30년 딥프록시 건너뜀.")
             return None
-        start_str = pd.Timestamp(start_date).strftime('%Y%m%d')
-        end_str = pd.Timestamp(end_date).strftime('%Y%m%d')
-        url = (
-            f"https://ecos.bok.or.kr/api/StatisticSearch/{api_key}/json/kr"
-            f"/1/100000/817Y002/DD/{start_str}/{end_str}/010200000"
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        yields_raw = fred.get_series(
+            'IRLTLT01KRM156N',
+            observation_start=start_ts,
+            observation_end=end_ts,
         )
-        resp = _requests.get(url, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        rows = data.get('StatisticSearch', {}).get('row', [])
-        if not rows:
-            st.warning("ECOS API 응답에 데이터가 없습니다 (한국채30년 딥프록시).")
+        if yields_raw is None or yields_raw.empty:
+            st.warning("FRED IRLTLT01KRM156N 데이터를 가져올 수 없습니다 (한국채30년 딥프록시).")
             return None
-        records = []
-        for r in rows:
-            try:
-                dt = pd.to_datetime(r['TIME'], format='%Y%m%d')
-                val = float(r['DATA_VALUE'])
-                records.append((dt, val))
-            except (KeyError, ValueError):
-                continue
-        if not records:
-            return None
-        yields = pd.Series(dict(records)).sort_index()
-        # 영업일 기준 리인덱싱 + ffill
-        all_dates = pd.bdate_range(start=yields.index.min(), end=yields.index.max())
-        yields = yields.reindex(all_dates).ffill().dropna()
+        yields_raw = yields_raw.dropna()
+        # 월별 → 영업일 리샘플링 + ffill
+        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
+        yields = yields_raw.reindex(all_dates).ffill().dropna()
         # 수익률(%) → 일별 채권가격 (10년 국고채 듀레이션)
         daily_yield_change = yields.diff() / 100
         duration_10y = 10.0
         daily_return = -duration_10y / (1 + yields.shift(1) / 100) * daily_yield_change
         daily_return = daily_return.fillna(0.0)
-        # 기준가 100에서 누적곱
         price_10y = (1 + daily_return).cumprod() * 100
         # 듀레이션 배수로 30년채 합성
         daily_ret_10y = price_10y.pct_change().fillna(0.0)
@@ -311,7 +301,7 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
         result['Adj Close'] = result['Close']
         return result
     except Exception as e:
-        st.warning(f"딥프록시(KR채권 ECOS) 로딩 오류: {e}")
+        st.warning(f"딥프록시(KR채권 FRED) 로딩 오류: {e}")
         return None
 
 
@@ -322,11 +312,13 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
     """
     try:
         from fredapi import Fred
-        fred_api_key = st.secrets.get("FRED_API_KEY", "")
-        if not fred_api_key:
-            st.warning("FRED_API_KEY가 Secrets에 없습니다. 미국채30년 딥프록시 건너뜀.")
+        try:
+            fred_key = st.secrets["FRED_API_KEY"]
+            fred = Fred(api_key=fred_key)
+        except Exception:
+            fred = None
+            st.warning("FRED API 키 없음 — 미국채30년 딥프록시 건너뜀.")
             return None
-        fred = Fred(api_key=fred_api_key)
         start_ts = pd.Timestamp(start_date)
         end_ts = pd.Timestamp(end_date)
         yields_raw = fred.get_series('GS30', observation_start=start_ts, observation_end=end_ts)
@@ -361,45 +353,48 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_gold_fred(start_date, end_date):
-    """FRED 금현물 × USD/KRW → KRW 가격 딥프록시 (2000-01-01~).
-    GLD 상장 전(2004-11-18) 구간 커버.
-    시리즈 우선순위: GOLDAMGBD228NLBM(AM 고정가) → GOLDPMGBD228NLBM(PM 고정가) 순으로 시도.
+    """금 딥프록시 × USD/KRW → KRW 가격 (2000-01-01~).
+    소스 우선순위:
+      1순위: fdr.DataReader('GLD', ...)  — 2004-11-18~ (ETF 상장일)
+      2순위: fdr.DataReader('GC=F', ...) — 금 선물, 더 긴 히스토리
+    fredapi 의존성 없음.
     """
     try:
-        from fredapi import Fred
-        fred_api_key = st.secrets.get("FRED_API_KEY", "")
-        if not fred_api_key:
-            st.warning("FRED_API_KEY가 Secrets에 없습니다. 금현물 딥프록시 건너뜀.")
-            return None
-        fred = Fred(api_key=fred_api_key)
-        start_ts = pd.Timestamp(start_date)
-        end_ts = pd.Timestamp(end_date)
-        gold_raw = None
-        for series_id in ('GOLDAMGBD228NLBM', 'GOLDPMGBD228NLBM'):
-            try:
-                s = fred.get_series(series_id, observation_start=start_ts, observation_end=end_ts)
-                if s is not None and not s.empty and s.dropna().shape[0] > 0:
-                    gold_raw = s.dropna()
-                    break
-            except Exception:
-                continue
-        if gold_raw is None or gold_raw.empty:
-            st.warning("FRED 금 시리즈(GOLDAMGBD228NLBM / GOLDPMGBD228NLBM) 데이터를 가져올 수 없습니다.")
-            return None
         usdkrw_df = fdr.DataReader('USD/KRW', start_date, end_date)
         if usdkrw_df is None or usdkrw_df.empty:
+            st.warning("USD/KRW 데이터를 가져올 수 없습니다 (금 딥프록시).")
             return None
         usdkrw = usdkrw_df['Close']
         usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
-        merged = pd.concat([gold_raw, usdkrw], axis=1, keys=['gold', 'fx'])
+
+        gold_usd = None
+        for ticker in ('GLD', 'GC=F'):
+            try:
+                df = fdr.DataReader(ticker, start_date, end_date)
+                if df is None or df.empty:
+                    continue
+                df = df[~df.index.duplicated(keep='last')].sort_index()
+                col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
+                s = df[col].dropna()
+                if len(s) > 0:
+                    gold_usd = s
+                    break
+            except Exception:
+                continue
+
+        if gold_usd is None or gold_usd.empty:
+            st.warning("금 딥프록시 소스(GLD, GC=F) 모두 로딩 실패.")
+            return None
+
+        merged = pd.concat([gold_usd, usdkrw], axis=1, keys=['gold', 'fx'])
         merged = merged.ffill().dropna()
         price_krw = merged['gold'] * merged['fx']
         result = pd.DataFrame(index=price_krw.index)
-        result['Close'] = price_krw.values
+        result['Close'] = price_krw.values.astype(float)
         result['Adj Close'] = result['Close']
         return result
     except Exception as e:
-        st.warning(f"딥프록시(금 FRED) 로딩 오류: {e}")
+        st.warning(f"딥프록시(금) 로딩 오류: {e}")
         return None
 
 
