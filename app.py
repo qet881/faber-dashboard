@@ -530,7 +530,7 @@ def _chain_link_series(proxy_df, etf_df):
     combined = combined[~combined.index.duplicated(keep='last')]
 
     # ── 연결 시점 수익률 연속성 검증 ──────────────────────────
-    # 연결 경계 전후 각 1개 행을 꺼내 수익률 점프 여부를 확인한다.
+    # 동일 연결 시점 경고는 세션당 1회만 출력한다.
     try:
         boundary_rows = combined[col].loc[
             (combined.index >= etf_start - pd.Timedelta(days=10)) &
@@ -540,11 +540,14 @@ def _chain_link_series(proxy_df, etf_df):
             boundary_ret = boundary_rows.pct_change().dropna().abs()
             max_jump = float(boundary_ret.max())
             if max_jump > 0.10:
-                st.warning(
-                    f"⚠️ 체인링크 연결 시점({etf_start.date()}) 근방에서 "
-                    f"수익률 점프 감지: 최대 {max_jump*100:.1f}%. "
-                    "ratio 재계산에도 불구하고 완전히 제거되지 않을 수 있습니다."
-                )
+                warn_key = f"_chainlink_jump_{etf_start.date()}"
+                if warn_key not in st.session_state:
+                    st.session_state[warn_key] = True
+                    st.warning(
+                        f"⚠️ 체인링크 연결 시점({etf_start.date()}) 근방에서 "
+                        f"수익률 점프 감지: 최대 {max_jump*100:.1f}%. "
+                        "ratio 재계산에도 불구하고 완전히 제거되지 않을 수 있습니다."
+                    )
     except Exception:
         pass
 
