@@ -1162,6 +1162,43 @@ def simulate_single_asset_bh(asset_name, start_date, end_date, initial_capital, 
     return df
 
 
+def simulate_equal_weight_no_cash(start_date, end_date, initial_capital, all_data, price_col="Adj Close"):
+    """현금 슬롯 없이 5자산 정확히 각 20% 고정, 월말 리밸런싱.
+    [S-1] 클로저 의존성 제거: all_data를 인자로 받아 최상위 함수로 정의.
+    [S-2] avail이 빈 경우 ZeroDivisionError 방지 가드 포함.
+    """
+    trading_dates = build_trading_calendar(all_data, start_date, end_date)
+    if not trading_dates:
+        return None
+    eq_w = {name: 0.20 for name in ASSETS.keys()}
+    eq_w[CASH_NAME] = 0.0
+    holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
+    rebalance_holdings(initial_capital, trading_dates[0], eq_w, holdings, all_data, price_col=price_col)
+    daily_nav = []
+    for i, date in enumerate(trading_dates):
+        pv = _calc_portfolio_value(holdings, date, all_data, price_col)
+        if pv <= 0:
+            pv = initial_capital
+        daily_nav.append({"date": date, "nav": pv})
+        is_last = (i == len(trading_dates) - 1) or (
+            trading_dates[i + 1].month != date.month or
+            trading_dates[i + 1].year != date.year
+        )
+        if is_last and date != trading_dates[0]:
+            avail = [n for n in ASSETS.keys()
+                     if get_price_at_date(all_data.get(n), date, price_col=price_col) not in (None, 0)]
+            if avail:  # [S-2] avail=[] 시 ZeroDivisionError 방지
+                sw = {n: (1.0 / len(avail)) if n in avail else 0.0 for n in ASSETS.keys()}
+            else:
+                sw = {n: 0.0 for n in ASSETS.keys()}
+            sw[CASH_NAME] = 0.0
+            rebalance_holdings(pv, date, sw, holdings, all_data, price_col=price_col)
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
 def build_benchmark_etf_returns(benchmark_df, strategy_nav_df, initial_capital):
     """보조 벤치마크 ETF의 수익률을 전략 시작일 기준으로 정규화."""
     if benchmark_df is None or benchmark_df.empty or strategy_nav_df is None:
@@ -1294,7 +1331,7 @@ def build_comparison_table(strategies_dict, initial_capital):
             "MDD (일별)": f"{mdd*100:.2f}%" if mdd is not None else "-",
             "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
             "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
-            "CAGR/MDD": f"{abs(cagr/mdd):.2f}" if cagr and mdd and abs(mdd) > 0.001 else "-",
+            "CAGR/MDD": f"{abs(cagr/mdd):.2f}" if (cagr is not None and mdd is not None and abs(mdd) > 0.001) else "-",
             "_sortino_raw": sortino if sortino is not None else -999,
         })
     if not rows: return None
@@ -1706,38 +1743,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
     st.caption("현금 없이 5자산 각 20%를 고정 후 월말 리밸런싱. Faber A의 타이밍 능력이 단순 분산 대비 얼마나 유효한지 확인합니다.")
 
-    # simulate_static_equal_weight: 현금 슬롯 없이 5자산 정확히 20% × 5
-    @st.cache_data(ttl=3600)
-    def _simulate_equal_weight_no_cash(start_date, end_date, ic, _all_data_keys, price_col="Adj Close"):
-        """현금 슬롯 없음. 5자산 정확히 각 20% 고정, 월말 리밸런싱."""
-        # _all_data_keys는 캐시 키 역할 (실제 데이터는 all_data 클로저)
-        trading_dates = build_trading_calendar(all_data, start_date, end_date)
-        if not trading_dates: return None
-        eq_w = {name: 0.20 for name in ASSETS.keys()}
-        eq_w[CASH_NAME] = 0.0
-        holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
-        rebalance_holdings(ic, trading_dates[0], eq_w, holdings, all_data, price_col=price_col)
-        daily_nav = []
-        for i, date in enumerate(trading_dates):
-            pv = _calc_portfolio_value(holdings, date, all_data, price_col)
-            if pv <= 0: pv = ic
-            daily_nav.append({"date": date, "nav": pv})
-            is_last = (i == len(trading_dates) - 1) or (
-                trading_dates[i+1].month != date.month or trading_dates[i+1].year != date.year)
-            if is_last and date != trading_dates[0]:
-                avail = [n for n in ASSETS.keys()
-                         if get_price_at_date(all_data.get(n), date, price_col=price_col) not in (None, 0)]
-                sw = {n: (1.0 / len(avail)) if n in avail else 0.0 for n in ASSETS.keys()}
-                sw[CASH_NAME] = 0.0
-                rebalance_holdings(pv, date, sw, holdings, all_data, price_col=price_col)
-        df = pd.DataFrame(daily_nav).set_index("date").sort_index()
-        df["running_max"] = df["nav"].expanding().max()
-        df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
-        return df
-
-    eq_nav = _simulate_equal_weight_no_cash(
-        bt_start_date, current_date, IC,
-        tuple(sorted(all_data.keys())), price_col=price_col)
+    eq_nav = simulate_equal_weight_no_cash(
+        bt_start_date, current_date, IC, all_data, price_col=price_col)
 
     if eq_nav is not None and nav_df is not None:
         static_cmp = build_comparison_table({
@@ -2232,10 +2239,12 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     ov_, or_, om_, oc_ = calculate_performance_metrics(orig_nav, IC)
                     av_, ar_, am_, ac_ = calculate_performance_metrics(alt_nav, IC)
                     bc1, bc2, bc3, bc4 = st.columns(4)
-                    bc1.metric("기존 CAGR", f"{oc_*100:.2f}%")
-                    bc2.metric("교체 CAGR", f"{ac_*100:.2f}%", delta=f"{(ac_-oc_)*100:+.2f}%p")
-                    bc3.metric("기존 MDD", f"{om_*100:.2f}%")
-                    bc4.metric("교체 MDD", f"{am_*100:.2f}%", delta=f"{(am_-om_)*100:+.2f}%p")
+                    bc1.metric("기존 CAGR", f"{oc_*100:.2f}%" if oc_ is not None else "-")
+                    bc2.metric("교체 CAGR", f"{ac_*100:.2f}%" if ac_ is not None else "-",
+                               delta=f"{(ac_-oc_)*100:+.2f}%p" if (ac_ is not None and oc_ is not None) else None)
+                    bc3.metric("기존 MDD", f"{om_*100:.2f}%" if om_ is not None else "-")
+                    bc4.metric("교체 MDD", f"{am_*100:.2f}%" if am_ is not None else "-",
+                               delta=f"{(am_-om_)*100:+.2f}%p" if (am_ is not None and om_ is not None) else None)
 
                     # 비교 차트
                     fig_bc = make_subplots(rows=2, cols=1, subplot_titles=("수익률 (%)", "Drawdown (%)"),
@@ -2309,26 +2318,31 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 orig_bh  = simulate_single_asset_bh('미국채30년', bt_start_date, current_date, IC, all_data, price_col=price_col)
 
                 if tips_nav is not None:
-                    tips_comp = build_comparison_table({
-                        '기존 Faber A (미국채30년=TLT)': nav_df,
-                        '교체 Faber A (미국채30년→TIPS)': tips_nav,
-                    }, IC)
-                    if orig_bh is not None: tips_comp = build_comparison_table({
-                        '기존 Faber A (TLT) ⭐': nav_df,
-                        '교체 Faber A (TIPS)': tips_nav,
-                        'TLT B&H': orig_bh,
-                        'TIPS B&H': tips_bh,
-                    }, IC) if tips_bh is not None else None
+                    # B&H 데이터 유무에 따라 비교 테이블을 한 번만 조립 (덮어쓰기 버그 방지)
+                    if orig_bh is not None and tips_bh is not None:
+                        tips_comp = build_comparison_table({
+                            '기존 Faber A (TLT) ⭐': nav_df,
+                            '교체 Faber A (TIPS)': tips_nav,
+                            'TLT B&H': orig_bh,
+                            'TIPS B&H': tips_bh,
+                        }, IC)
+                    else:
+                        tips_comp = build_comparison_table({
+                            '기존 Faber A (미국채30년=TLT)': nav_df,
+                            '교체 Faber A (미국채30년→TIPS)': tips_nav,
+                        }, IC)
                     if tips_comp is not None:
                         st.dataframe(tips_comp, use_container_width=True)
 
                     tv_, tr_, tm_, tc_ = calculate_performance_metrics(tips_nav, IC)
                     ov_, or2_, om_, oc_ = calculate_performance_metrics(nav_df, IC)
                     tc1, tc2, tc3, tc4 = st.columns(4)
-                    tc1.metric("기존 CAGR (TLT)", f"{oc_*100:.2f}%")
-                    tc2.metric("TIPS CAGR", f"{tc_*100:.2f}%", delta=f"{(tc_-oc_)*100:+.2f}%p")
-                    tc3.metric("기존 MDD (TLT)", f"{om_*100:.2f}%")
-                    tc4.metric("TIPS MDD", f"{tm_*100:.2f}%", delta=f"{(tm_-om_)*100:+.2f}%p")
+                    tc1.metric("기존 CAGR (TLT)", f"{oc_*100:.2f}%" if oc_ is not None else "-")
+                    tc2.metric("TIPS CAGR", f"{tc_*100:.2f}%" if tc_ is not None else "-",
+                               delta=f"{(tc_-oc_)*100:+.2f}%p" if (tc_ is not None and oc_ is not None) else None)
+                    tc3.metric("기존 MDD (TLT)", f"{om_*100:.2f}%" if om_ is not None else "-")
+                    tc4.metric("TIPS MDD", f"{tm_*100:.2f}%" if tm_ is not None else "-",
+                               delta=f"{(tm_-om_)*100:+.2f}%p" if (tm_ is not None and om_ is not None) else None)
 
                     # 비교 차트
                     fig_tips = make_subplots(rows=2, cols=1,
@@ -2452,10 +2466,12 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         fv_, fr_, fm_, fc_ = calculate_performance_metrics(nav_df, IC)
         gv_, gr_, gm_, gc_ = calculate_performance_metrics(gtaa_nav, IC)
         gc1, gc2, gc3, gc4 = st.columns(4)
-        gc1.metric("Faber A CAGR", f"{fc_*100:.2f}%")
-        gc2.metric("GTAA CAGR", f"{gc_*100:.2f}%", delta=f"{(gc_-fc_)*100:+.2f}%p")
-        gc3.metric("Faber A MDD", f"{fm_*100:.2f}%")
-        gc4.metric("GTAA MDD", f"{gm_*100:.2f}%", delta=f"{(gm_-fm_)*100:+.2f}%p")
+        gc1.metric("Faber A CAGR", f"{fc_*100:.2f}%" if fc_ is not None else "-")
+        gc2.metric("GTAA CAGR", f"{gc_*100:.2f}%" if gc_ is not None else "-",
+                   delta=f"{(gc_-fc_)*100:+.2f}%p" if (gc_ is not None and fc_ is not None) else None)
+        gc3.metric("Faber A MDD", f"{fm_*100:.2f}%" if fm_ is not None else "-")
+        gc4.metric("GTAA MDD", f"{gm_*100:.2f}%" if gm_ is not None else "-",
+                   delta=f"{(gm_-fm_)*100:+.2f}%p" if (gm_ is not None and fm_ is not None) else None)
 
         # 비교 차트
         fig_gtaa = make_subplots(rows=2, cols=1, subplot_titles=("수익률 (%)", "Drawdown (%)"),
@@ -2756,14 +2772,15 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.sidebar.markdown("---")
     st.sidebar.metric("총 운용 자산", f"{current_total_assets:,.0f}원")
 
+    # data_start는 bt_start_date/inv_start_date 중 더 이른 날 - 18개월이므로
+    # all_data 단일 로딩으로 역대 MDD 계산까지 커버 가능 (M-1: 이중 호출 제거)
     data_start = min(bt_start_date, inv_start_date) - relativedelta(months=18)
     with st.spinner("📊 데이터를 불러오는 중..."):
         all_data = load_market_data(data_start, current_date, hybrid=True)
 
-    # 역대 백테스트 MDD 계산 (Faber A 기준, 하이브리드 데이터)
+    # 역대 백테스트 MDD 계산 (Faber A 기준, 위에서 로딩한 all_data 재사용)
     with st.spinner("📊 역대 MDD 계산 중 (Faber A)..."):
-        hybrid_data = load_market_data(bt_start_date - relativedelta(months=18), current_date, hybrid=True)
-        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, 10_000_000, hybrid_data,
+        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, 10_000_000, all_data,
             mode='A', buffer_df=None, price_col=price_col)
         bt_mdd_historical = calculate_performance_metrics(bt_nav_full, 10_000_000)[2] if bt_nav_full is not None else None
 
