@@ -292,7 +292,9 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
         daily_return = -duration_10y / (1 + yields.shift(1) / 100) * daily_yield_change
         daily_return = daily_return.fillna(0.0)
         price_10y = (1 + daily_return).cumprod() * 100
-        # 듀레이션 배수로 30년채 합성
+        # KR_BOND_DURATION_FACTOR(현재값=2.5) 로 10년채 일간수익률을 레버리지해 30년채 합성.
+        # ✅ 확인: adjusted_ret = daily_ret_10y × 2.5 → price_30y 는 사실상 10년채×2.5배 가격.
+        #    KOSEF국고채10년×2.5배 프록시와 동일 방식으로 처리되어 체인링크 연결 일관성 확보.
         daily_ret_10y = price_10y.pct_change().fillna(0.0)
         adjusted_ret = (daily_ret_10y * KR_BOND_DURATION_FACTOR).clip(-0.15, 0.15)
         price_30y = (1 + adjusted_ret).cumprod() * 100
@@ -1088,6 +1090,78 @@ def simulate_static_benchmark(start_date, end_date, initial_capital, all_data, p
     return df
 
 
+def simulate_single_asset_faber(asset_name, start_date, end_date, initial_capital, all_data, price_col="Adj Close"):
+    """단일 자산 Faber A: -5% 룰 → 해당 자산 100% or 현금 100%, 월말 리밸런싱."""
+    trading_dates = build_trading_calendar(all_data, start_date, end_date)
+    if not trading_dates:
+        return None
+    actual_start = trading_dates[0]
+    asset_df = all_data.get(asset_name)
+    cash_df = all_data.get(CASH_NAME)
+
+    cash_px0 = get_price_at_date(cash_df, actual_start, price_col=price_col) or 10000.0
+    asset_px0 = get_price_at_date(asset_df, actual_start, price_col=price_col)
+    near_high0 = is_near_12month_high(asset_df, actual_start, threshold=0.05, price_col=price_col)
+
+    holdings_asset = 0.0
+    holdings_cash = 0.0
+    if near_high0 and asset_px0 and asset_px0 > 0:
+        holdings_asset = initial_capital / asset_px0
+    else:
+        holdings_cash = initial_capital / cash_px0
+
+    daily_nav = []
+    for i, date in enumerate(trading_dates):
+        asset_px = get_price_at_date(asset_df, date, price_col=price_col)
+        cash_px = get_price_at_date(cash_df, date, price_col=price_col) or 10000.0
+        pv = (holdings_asset * asset_px if asset_px else 0.0) + holdings_cash * cash_px
+        if pv <= 0:
+            pv = initial_capital
+        daily_nav.append({"date": date, "nav": pv})
+
+        is_last = (i == len(trading_dates) - 1) or (
+            trading_dates[i + 1].month != date.month or trading_dates[i + 1].year != date.year)
+        if is_last and date != actual_start:
+            near_high = is_near_12month_high(asset_df, date, threshold=0.05, price_col=price_col)
+            asset_px = get_price_at_date(asset_df, date, price_col=price_col)
+            cash_px = get_price_at_date(cash_df, date, price_col=price_col) or 10000.0
+            if near_high and asset_px and asset_px > 0:
+                holdings_asset = pv / asset_px
+                holdings_cash = 0.0
+            else:
+                holdings_asset = 0.0
+                holdings_cash = pv / cash_px
+
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
+def simulate_single_asset_bh(asset_name, start_date, end_date, initial_capital, all_data, price_col="Adj Close"):
+    """단일 자산 100% 보유 (Buy & Hold)."""
+    trading_dates = build_trading_calendar(all_data, start_date, end_date)
+    if not trading_dates:
+        return None
+    asset_df = all_data.get(asset_name)
+    px0 = get_price_at_date(asset_df, trading_dates[0], price_col=price_col)
+    if not px0 or px0 <= 0:
+        return None
+    holdings = initial_capital / px0
+
+    daily_nav = []
+    for date in trading_dates:
+        px = get_price_at_date(asset_df, date, price_col=price_col)
+        if px and px > 0:
+            daily_nav.append({"date": date, "nav": holdings * px})
+    if not daily_nav:
+        return None
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
 def build_benchmark_etf_returns(benchmark_df, strategy_nav_df, initial_capital):
     """보조 벤치마크 ETF의 수익률을 전략 시작일 기준으로 정규화."""
     if benchmark_df is None or benchmark_df.empty or strategy_nav_df is None:
@@ -1452,7 +1526,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         DEEP_PROXY_NOTES = {
             '코스피200':    'KOSPI지수(딥) → KODEX200 → 실제ETF: 2000-01-01 ~ 현재',
             '미국나스닥100': 'QQQ × USD/KRW → 실제ETF: 2000-01-01 ~ 현재',
-            '한국채30년':   'ECOS국고채10년(딥) → KOSEF10년 → 실제ETF: 2000-01-01 ~ 현재',
+            '한국채30년':   'ECOS국고채10년×2.5배(딥) → KOSEF국고채10년×2.5배 → 실제ETF: 2000-01-01 ~ 현재',
             '미국채30년':   'FRED GS30(딥) → TLT×환율 → 실제ETF: 2000-01-01 ~ 현재',
             '금현물':       'FRED금현물(딥) → GLD×환율 → 실제ETF: 2000-01-01 ~ 현재',
         }
@@ -1539,6 +1613,28 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     static_nav = simulate_static_benchmark(bt_start_date, current_date, IC, all_data, price_col=price_col)
     benchmark_nav = build_benchmark_etf_returns(benchmark_raw, nav_df, IC)
 
+    # ALLW (US ETF) × USD/KRW 벤치마크 로딩
+    allw_nav = None
+    try:
+        allw_raw = fdr.DataReader('ALLW', bt_start_date, current_date)
+        allw_fx  = fdr.DataReader('USD/KRW', bt_start_date, current_date)
+        if allw_raw is not None and not allw_raw.empty and allw_fx is not None and not allw_fx.empty:
+            allw_raw = allw_raw[~allw_raw.index.duplicated(keep='last')].sort_index()
+            allw_fx  = allw_fx[~allw_fx.index.duplicated(keep='last')]
+            allw_col = 'Adj Close' if 'Adj Close' in allw_raw.columns else 'Close'
+            allw_merged = pd.concat([allw_raw[allw_col], allw_fx['Close']], axis=1, keys=['ALLW', 'FX'])
+            allw_merged = allw_merged.ffill().dropna()
+            allw_price_krw = allw_merged['ALLW'] * allw_merged['FX']
+            base_allw = float(allw_price_krw.iloc[0])
+            if base_allw > 0:
+                allw_series = (allw_price_krw / base_allw) * IC
+                allw_df = pd.DataFrame({"nav": allw_series})
+                allw_df["running_max"] = allw_df["nav"].expanding().max()
+                allw_df["drawdown"] = (allw_df["nav"] - allw_df["running_max"]) / allw_df["running_max"]
+                allw_nav = allw_df
+    except Exception:
+        allw_nav = None
+
     # 성과 지표 (Faber A)
     s_value, s_return, s_mdd, s_cagr = calculate_performance_metrics(nav_df, IC)
     s_peak, s_valley, _ = find_mdd_period(nav_df)
@@ -1561,6 +1657,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.subheader("📉 Faber A 성과 차트")
     extra = {"이전 전략: 연속 모멘텀 (참고)": (old_nav, "#ff7f0e", "dash")} if old_nav is not None else {}
     extra["동일비중 B&H"] = (static_nav, "gray", "dot")
+    if allw_nav is not None:
+        extra["ALLW (2025~)"] = (allw_nav, "#9467bd", "dashdot")
     fig = create_nav_and_drawdown_chart(nav_df, IC, s_peak, s_valley,
         "Faber A 전략: 수익률 및 Drawdown",
         monthly_peak_date=s_m_peak, monthly_valley_date=s_m_valley, monthly_mdd_val=s_m_mdd_val,
@@ -1602,6 +1700,86 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
     st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+
+    # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
+    st.markdown("---")
+    st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
+    st.caption("현금 없이 5자산 각 20%를 고정 후 월말 리밸런싱. Faber A의 타이밍 능력이 단순 분산 대비 얼마나 유효한지 확인합니다.")
+
+    # simulate_static_equal_weight: 현금 슬롯 없이 5자산 정확히 20% × 5
+    @st.cache_data(ttl=3600)
+    def _simulate_equal_weight_no_cash(start_date, end_date, ic, _all_data_keys, price_col="Adj Close"):
+        """현금 슬롯 없음. 5자산 정확히 각 20% 고정, 월말 리밸런싱."""
+        # _all_data_keys는 캐시 키 역할 (실제 데이터는 all_data 클로저)
+        trading_dates = build_trading_calendar(all_data, start_date, end_date)
+        if not trading_dates: return None
+        eq_w = {name: 0.20 for name in ASSETS.keys()}
+        eq_w[CASH_NAME] = 0.0
+        holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
+        rebalance_holdings(ic, trading_dates[0], eq_w, holdings, all_data, price_col=price_col)
+        daily_nav = []
+        for i, date in enumerate(trading_dates):
+            pv = _calc_portfolio_value(holdings, date, all_data, price_col)
+            if pv <= 0: pv = ic
+            daily_nav.append({"date": date, "nav": pv})
+            is_last = (i == len(trading_dates) - 1) or (
+                trading_dates[i+1].month != date.month or trading_dates[i+1].year != date.year)
+            if is_last and date != trading_dates[0]:
+                avail = [n for n in ASSETS.keys()
+                         if get_price_at_date(all_data.get(n), date, price_col=price_col) not in (None, 0)]
+                sw = {n: (1.0 / len(avail)) if n in avail else 0.0 for n in ASSETS.keys()}
+                sw[CASH_NAME] = 0.0
+                rebalance_holdings(pv, date, sw, holdings, all_data, price_col=price_col)
+        df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+        df["running_max"] = df["nav"].expanding().max()
+        df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+        return df
+
+    eq_nav = _simulate_equal_weight_no_cash(
+        bt_start_date, current_date, IC,
+        tuple(sorted(all_data.keys())), price_col=price_col)
+
+    if eq_nav is not None and nav_df is not None:
+        static_cmp = build_comparison_table({
+            'Faber A (5자산 타이밍) ⭐': nav_df,
+            '정적 균등 (20%×5, 현금無)': eq_nav,
+            '동일비중 B&H (현금포함)': static_nav,
+        }, IC)
+        if static_cmp is not None:
+            st.dataframe(static_cmp, use_container_width=True)
+
+        # 비교 차트
+        fig_static = make_subplots(rows=2, cols=1,
+            subplot_titles=("수익률 (%)", "Drawdown (%)"),
+            vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
+        faber_pct = ((nav_df['nav'] / IC) - 1) * 100
+        eq_pct    = ((eq_nav['nav']  / IC) - 1) * 100
+        fig_static.add_trace(go.Scatter(x=nav_df.index, y=faber_pct, mode='lines',
+            name='Faber A ⭐', line=dict(color='#1f77b4', width=2),
+            hovertemplate="%{x|%Y-%m-%d}<br>Faber A: %{y:.1f}%<extra></extra>"), row=1, col=1)
+        fig_static.add_trace(go.Scatter(x=eq_nav.index, y=eq_pct, mode='lines',
+            name='정적 균등 20%×5', line=dict(color='#d62728', width=2, dash='dash'),
+            hovertemplate="%{x|%Y-%m-%d}<br>정적: %{y:.1f}%<extra></extra>"), row=1, col=1)
+        if static_nav is not None:
+            st_pct = ((static_nav['nav'] / IC) - 1) * 100
+            fig_static.add_trace(go.Scatter(x=static_nav.index, y=st_pct, mode='lines',
+                name='동일비중+현금', line=dict(color='gray', width=1, dash='dot'),
+                hovertemplate="%{x|%Y-%m-%d}<br>B&H: %{y:.1f}%<extra></extra>"), row=1, col=1)
+        fig_static.add_trace(go.Scatter(x=nav_df.index, y=nav_df['drawdown']*100,
+            mode='lines', name='DD Faber A', fill='tozeroy',
+            line=dict(color='#1f77b4', width=1)), row=2, col=1)
+        fig_static.add_trace(go.Scatter(x=eq_nav.index, y=eq_nav['drawdown']*100,
+            mode='lines', name='DD 정적',
+            line=dict(color='#d62728', width=1.5, dash='dash')), row=2, col=1)
+        fig_static.update_yaxes(title_text="수익률 (%)", row=1, col=1)
+        fig_static.update_yaxes(title_text="낙폭 (%)", row=2, col=1)
+        fig_static.update_layout(
+            title="Faber A vs 정적 균등 자산배분 (20%×5)",
+            height=650, hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        st.plotly_chart(fig_static, use_container_width=True)
+        st.caption("💡 **정적 균등**: 시장 상황에 관계없이 5자산 20%씩 유지. "
+                   "Faber A보다 MDD가 크지만 CAGR도 높을 수 있음 — 타이밍 비용 vs 하락 방어 트레이드오프.")
 
     # Faber A 월별 비중 변화
     st.markdown("---")
@@ -2094,6 +2272,147 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 st.warning("SCHD×USD/KRW 데이터를 가져올 수 없습니다.")
         except Exception as e:
             st.warning(f"채권 슬롯 비교 오류: {e}")
+
+    # ==============================
+    # 🛡️ 채권 슬롯 교체: 미국채30년 → TIPS 비교
+    # ==============================
+    st.markdown("---")
+    st.subheader("🛡️ 채권 슬롯 교체: 미국채30년(TLT) → TIPS(TIP ETF) 비교")
+    st.caption("미국 물가연동채(TIPS) ETF × USD/KRW를 미국채30년 자리에 대체했을 때의 성과를 비교합니다. "
+               "인플레이션 헤지 효과가 있는지, Faber A 전략과 궁합은 어떤지 확인합니다.")
+
+    with st.spinner("🛡️ TIPS 슬롯 교체 시뮬레이션 중..."):
+        try:
+            # TIP ETF × USD/KRW 로딩 (상장일: 2003-12-05)
+            tip_raw = fdr.DataReader('TIP', data_start, current_date)
+            usdkrw_tip = fdr.DataReader('USD/KRW', data_start, current_date)
+            tip_nav_data = None
+            if tip_raw is not None and not tip_raw.empty and usdkrw_tip is not None and not usdkrw_tip.empty:
+                tip_raw = tip_raw[~tip_raw.index.duplicated(keep='last')].sort_index()
+                usdkrw_tip = usdkrw_tip[~usdkrw_tip.index.duplicated(keep='last')]
+                tip_col = 'Adj Close' if 'Adj Close' in tip_raw.columns else 'Close'
+                merged_tip = pd.concat([tip_raw[tip_col], usdkrw_tip['Close']], axis=1, keys=['TIP', 'FX'])
+                merged_tip = merged_tip.ffill().dropna()
+                tip_krw = merged_tip['TIP'] * merged_tip['FX']
+                tip_nav_data = pd.DataFrame(index=tip_krw.index)
+                tip_nav_data['Close'] = tip_krw.values.astype(float)
+                tip_nav_data['Adj Close'] = tip_nav_data['Close']
+
+            if tip_nav_data is not None and not tip_nav_data.empty:
+                tips_data = {k: v for k, v in all_data.items()}
+                tips_data['미국채30년'] = tip_nav_data
+                tips_data['미국채30년_모멘텀'] = tip_nav_data
+
+                tips_nav = simulate_faber_strategy(bt_start_date, current_date, IC, tips_data,
+                    mode='A', buffer_df=None, price_col=price_col)
+                tips_bh  = simulate_single_asset_bh('미국채30년', bt_start_date, current_date, IC, tips_data, price_col=price_col)
+                orig_bh  = simulate_single_asset_bh('미국채30년', bt_start_date, current_date, IC, all_data, price_col=price_col)
+
+                if tips_nav is not None:
+                    tips_comp = build_comparison_table({
+                        '기존 Faber A (미국채30년=TLT)': nav_df,
+                        '교체 Faber A (미국채30년→TIPS)': tips_nav,
+                    }, IC)
+                    if orig_bh is not None: tips_comp = build_comparison_table({
+                        '기존 Faber A (TLT) ⭐': nav_df,
+                        '교체 Faber A (TIPS)': tips_nav,
+                        'TLT B&H': orig_bh,
+                        'TIPS B&H': tips_bh,
+                    }, IC) if tips_bh is not None else None
+                    if tips_comp is not None:
+                        st.dataframe(tips_comp, use_container_width=True)
+
+                    tv_, tr_, tm_, tc_ = calculate_performance_metrics(tips_nav, IC)
+                    ov_, or2_, om_, oc_ = calculate_performance_metrics(nav_df, IC)
+                    tc1, tc2, tc3, tc4 = st.columns(4)
+                    tc1.metric("기존 CAGR (TLT)", f"{oc_*100:.2f}%")
+                    tc2.metric("TIPS CAGR", f"{tc_*100:.2f}%", delta=f"{(tc_-oc_)*100:+.2f}%p")
+                    tc3.metric("기존 MDD (TLT)", f"{om_*100:.2f}%")
+                    tc4.metric("TIPS MDD", f"{tm_*100:.2f}%", delta=f"{(tm_-om_)*100:+.2f}%p")
+
+                    # 비교 차트
+                    fig_tips = make_subplots(rows=2, cols=1,
+                        subplot_titles=("수익률 (%)", "Drawdown (%)"),
+                        vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
+                    orig_pct = ((nav_df['nav'] / IC) - 1) * 100
+                    tips_pct = ((tips_nav['nav'] / IC) - 1) * 100
+                    fig_tips.add_trace(go.Scatter(x=nav_df.index, y=orig_pct, mode='lines',
+                        name='기존 (TLT) ⭐', line=dict(color='#1f77b4', width=2),
+                        hovertemplate="%{x|%Y-%m-%d}<br>TLT: %{y:.1f}%<extra></extra>"), row=1, col=1)
+                    fig_tips.add_trace(go.Scatter(x=tips_nav.index, y=tips_pct, mode='lines',
+                        name='교체 (TIPS)', line=dict(color='#2ca02c', width=2, dash='dash'),
+                        hovertemplate="%{x|%Y-%m-%d}<br>TIPS: %{y:.1f}%<extra></extra>"), row=1, col=1)
+                    fig_tips.add_trace(go.Scatter(x=nav_df.index, y=nav_df['drawdown']*100,
+                        mode='lines', name='DD TLT', fill='tozeroy',
+                        line=dict(color='#1f77b4', width=1)), row=2, col=1)
+                    fig_tips.add_trace(go.Scatter(x=tips_nav.index, y=tips_nav['drawdown']*100,
+                        mode='lines', name='DD TIPS',
+                        line=dict(color='#2ca02c', width=1.5, dash='dash')), row=2, col=1)
+                    fig_tips.update_yaxes(title_text="수익률 (%)", row=1, col=1)
+                    fig_tips.update_yaxes(title_text="낙폭 (%)", row=2, col=1)
+                    fig_tips.update_layout(
+                        title="채권 슬롯 교체: 미국채30년(TLT) vs TIPS ETF",
+                        height=650, hovermode='x unified',
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    st.plotly_chart(fig_tips, use_container_width=True)
+                    st.caption("💡 TIPS는 원금이 CPI에 연동되어 인플레이션에 강하지만, "
+                               "금리 민감도가 TLT보다 낮아 디플레이션/금리 급락 국면에서 TLT 대비 방어력이 약할 수 있습니다.")
+                else:
+                    st.warning("TIPS 슬롯 시뮬레이션 실패 (데이터 부족).")
+            else:
+                st.warning("TIP ETF 데이터를 가져올 수 없습니다. (TIP 티커 FDR 미지원 가능성)")
+        except Exception as e:
+            st.warning(f"TIPS 슬롯 비교 오류: {e}")
+
+    # ==============================
+    # 🔬 자산별 단독 전략 비교
+    # ==============================
+    st.markdown("---")
+    st.subheader("🔬 자산별 단독 전략 비교")
+    st.caption("각 자산을 단독으로 Faber A(-5% 룰) 또는 Buy & Hold 했을 때의 성과를 Faber A 통합 전략과 비교합니다.")
+
+    with st.spinner("🔬 자산별 단독 전략 시뮬레이션 중..."):
+        asset_cmp_rows = []
+
+        # Faber A 통합 전략 (이미 계산된 nav_df)
+        def _asset_row(label, nav, ic):
+            if nav is None or nav.empty:
+                return None
+            _, _, mdd, cagr = calculate_performance_metrics(nav, ic)
+            sharpe  = calculate_sharpe_ratio(nav)
+            sortino = calculate_sortino_ratio(nav)
+            cagr_mdd = (cagr / abs(mdd)) if (mdd and mdd < 0) else None
+            return {
+                "전략": label,
+                "CAGR": f"{cagr*100:.2f}%" if cagr is not None else "-",
+                "MDD (일별)": f"{mdd*100:.2f}%" if mdd is not None else "-",
+                "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
+                "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
+                "CAGR/MDD": f"{cagr_mdd:.2f}" if cagr_mdd is not None else "-",
+                "_sort": sortino if sortino is not None else -999,
+            }
+
+        r = _asset_row("Faber A 통합 (5자산) ⭐", nav_df, IC)
+        if r: asset_cmp_rows.append(r)
+
+        for aname in ASSETS.keys():
+            faber1 = simulate_single_asset_faber(aname, bt_start_date, current_date, IC, all_data, price_col=price_col)
+            bh1    = simulate_single_asset_bh(aname, bt_start_date, current_date, IC, all_data, price_col=price_col)
+            r = _asset_row(f"{aname} Faber 단독", faber1, IC)
+            if r: asset_cmp_rows.append(r)
+            r = _asset_row(f"{aname} B&H", bh1, IC)
+            if r: asset_cmp_rows.append(r)
+
+    if asset_cmp_rows:
+        df_acmp = (pd.DataFrame(asset_cmp_rows)
+                   .sort_values("_sort", ascending=False)
+                   .reset_index(drop=True))
+        df_acmp.index = df_acmp.index + 1
+        df_acmp.index.name = "순위"
+        df_acmp = df_acmp.drop(columns=["_sort"])
+        st.dataframe(df_acmp, use_container_width=True)
+        st.caption("💡 **Faber 단독** = 해당 자산만 -5% 룰로 on/off. **B&H** = 해당 자산 100% 보유. "
+                   "통합 전략이 단독 대비 얼마나 분산 효과를 내는지 확인할 수 있습니다.")
 
     # ==============================
     # 🆚 GTAA(10개월 이동평균) vs Faber A 비교
@@ -2836,6 +3155,38 @@ def main():
                 if trade > 0: st.success(f"KRX 매도 → SOL 매수: {trade:,.0f}원")
                 elif trade < 0: st.warning(f"SOL 매도 → KRX 매수: {abs(trade):,.0f}원")
                 else: st.info("거래 불필요")
+    with st.sidebar.expander("🏠 부동산 매수 신호 (이현철 전세가율)", expanded=False):
+        st.caption("전세가율 기반 매수 시점 판단 (이현철 공식)")
+        re_sale = st.number_input("매매가 (만원)", value=50000, step=1000, key="re_sale")
+        re_jeon = st.number_input("전세가 (만원)", value=38000, step=1000, key="re_jeon")
+        re_trend = st.radio("전세가율 추이", ["상승중", "보합", "하락중"], index=1,
+                            horizontal=True, key="re_trend")
+        if re_sale > 0:
+            jeon_rate = re_jeon / re_sale * 100
+            # 기본 신호 단계
+            if jeon_rate >= 80:
+                base_signal, base_color = "🔵 강력 매수", "blue"
+            elif jeon_rate >= 75:
+                base_signal, base_color = "🟢 적극 매수", "green"
+            elif jeon_rate >= 70:
+                base_signal, base_color = "🟡 매수 고려 가능", "orange"
+            else:
+                base_signal, base_color = "🔴 매수 금지", "red"
+
+            # 추이 상승중이면 한 단계 상향
+            signal_labels = ["🔴 매수 금지", "🟡 매수 고려 가능", "🟢 적극 매수", "🔵 강력 매수"]
+            base_idx = signal_labels.index(base_signal)
+            if re_trend == "상승중" and base_idx < len(signal_labels) - 1:
+                final_signal = signal_labels[base_idx + 1]
+                upgraded = True
+            else:
+                final_signal = base_signal
+                upgraded = False
+
+            st.metric("전세가율", f"{jeon_rate:.1f}%")
+            st.markdown(f"**매수 신호:** {final_signal}")
+            if upgraded:
+                st.caption(f"↑ 전세가율 상승 추이로 인해 {base_signal} → {final_signal} 상향")
     st.sidebar.markdown("---")
 
     use_adj = st.sidebar.checkbox("수정주가 사용", value=True)
