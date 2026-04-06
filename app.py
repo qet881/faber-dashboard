@@ -1039,49 +1039,49 @@ def simulate_daily_nav_with_attribution(start_date, end_date, initial_capital, a
 
 
 def simulate_static_benchmark(start_date, end_date, initial_capital, all_data, price_col="Close"):
-    """정적 동일비중(각 자산 20%) 월별 리밸런싱 벤치마크 시뮬레이션."""
+    """정적 동일비중 월별 리밸런싱 벤치마크 시뮬레이션.
+    현금 슬롯 없이 데이터가 있는 자산만 균등 분배 (equal_w = 1 / len(available_assets)).
+    """
     trading_dates = build_trading_calendar(all_data, start_date, end_date)
     if len(trading_dates) == 0: return None
     actual_start = trading_dates[0]
-    
-    # 데이터가 있는 자산만 동일비중 배분
+
+    # 데이터가 있는 자산만 동일비중 배분 (현금 제외)
     available_assets = []
     for name in ASSETS.keys():
         px = get_price_at_date(all_data.get(name), actual_start, price_col=price_col)
         if px is not None and px > 0:
             available_assets.append(name)
-    
+
     if len(available_assets) == 0: return None
-    
-    equal_w = 1.0 / (len(available_assets) + 1)  # +1 for cash
+
+    equal_w = 1.0 / len(available_assets)  # 현금 없이 균등 분배
     static_weights = {name: equal_w if name in available_assets else 0.0 for name in ASSETS.keys()}
-    static_weights[CASH_NAME] = 1.0 - sum(static_weights.values())
-    
+    static_weights[CASH_NAME] = 0.0  # 현금 슬롯 사용 안 함
+
     holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
     rebalance_holdings(initial_capital, actual_start, static_weights, holdings, all_data, price_col=price_col)
-    
+
     daily_nav = []
     for i, date in enumerate(trading_dates):
         pv = _calc_portfolio_value(holdings, date, all_data, price_col)
         if pv <= 0: pv = initial_capital
         daily_nav.append({"date": date, "nav": pv})
-        
+
         is_last_day = (i == len(trading_dates) - 1)
         if not is_last_day:
             nd = trading_dates[i + 1]
             if nd.month != date.month or nd.year != date.year: is_last_day = True
-        
+
         if is_last_day and date != trading_dates[0]:
-            # 정적 비중 유지 리밸런싱 (모멘텀 없이 동일비중)
-            # 해당 시점에 데이터 있는 자산만 동일비중
+            # 해당 시점에 데이터 있는 자산만 동일비중, 현금 없음
             avail = [n for n in ASSETS.keys() if get_price_at_date(all_data.get(n), date, price_col=price_col) not in (None, 0)]
-            if len(avail) > 0:
-                ew = 1.0 / (len(avail) + 1)
+            if avail:
+                ew = 1.0 / len(avail)  # 현금 없이 균등
                 sw = {n: ew if n in avail else 0.0 for n in ASSETS.keys()}
-                sw[CASH_NAME] = 1.0 - sum(sw.values())
             else:
                 sw = {n: 0.0 for n in ASSETS.keys()}
-                sw[CASH_NAME] = 1.0
+            sw[CASH_NAME] = 0.0  # 현금 슬롯 항상 0
             rebalance_holdings(pv, date, sw, holdings, all_data, price_col=price_col)
     
     df = pd.DataFrame(daily_nav).set_index("date").sort_index()
@@ -1331,7 +1331,7 @@ def build_comparison_table(strategies_dict, initial_capital):
             "MDD (일별)": f"{mdd*100:.2f}%" if mdd is not None else "-",
             "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
             "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
-            "CAGR/MDD": f"{abs(cagr/mdd):.2f}" if (cagr is not None and mdd is not None and abs(mdd) > 0.001) else "-",
+            "CAGR/MDD": f"{abs(cagr/mdd):.2f}" if (cagr is not None and cagr != 0.0 and mdd is not None and abs(mdd) > 0.001) else "-",
             "_sortino_raw": sortino if sortino is not None else -999,
         })
     if not rows: return None
