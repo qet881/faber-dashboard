@@ -2327,16 +2327,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         except Exception:
             return None
 
-    def _safe_date(d):
-        """Timestamp / datetime / date 모두 datetime.date로 통일."""
-        import datetime as _dt
-        if hasattr(d, 'to_pydatetime'):
-            return d.to_pydatetime().date()
-        if isinstance(d, _dt.datetime):
-            return d.date()
-        if hasattr(d, 'date') and callable(d.date):
-            return d.date()
-        return d
+    def _safe_ts(d):
+        """모든 날짜 타입을 pd.Timestamp로 통일."""
+        import pandas as _pd
+        return _pd.Timestamp(d) if not isinstance(d, _pd.Timestamp) else d
 
     slot_configs = [
         ('⛽ XLE (에너지)', 'XLE',   '#2ca02c',
@@ -2367,8 +2361,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 alt_data['미국채30년'] = nav_data
                 alt_data['미국채30년_모멘텀'] = nav_data
                 # 데이터 시작일 기준 bt_start 조정
-                data_first = _safe_date(nav_data.index[0]) + relativedelta(months=13)
-                bt_s = max(_safe_date(bt_start_date), data_first)
+                data_first = _safe_ts(nav_data.index[0]) + relativedelta(months=13)
+                bt_s = max(_safe_ts(bt_start_date), data_first)
                 alt_nav = simulate_faber_strategy(bt_s, current_date, IC, alt_data, mode='A', price_col="Adj Close")
                 if alt_nav is not None:
                     slot_results[f'{label}→미국채30년'] = alt_nav
