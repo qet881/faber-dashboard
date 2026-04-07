@@ -2333,6 +2333,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         return _pd.Timestamp(d) if not isinstance(d, _pd.Timestamp) else d
 
     slot_configs = [
+        ('📈 IEF (미국채7-10년)', 'IEF', '#17becf',
+         "미국채 7-10년 ETF. TLT보다 듀레이션 짧아 변동성 낮음. 2002년 상장으로 시작점이 기존 Faber A(프록시 2000년)와 다름 — 참고용."),
         ('⛽ XLE (에너지)', 'XLE',   '#2ca02c',
          "에너지 섹터 ETF. 유가 사이클에 좌우됨. 2014~2016년, 2020년 급락이 핵심 변수."),
         ('🏦 XLF (금융)',   'XLF',   '#e377c2',
@@ -2342,7 +2344,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     ]
 
     st.markdown("---")
-    st.subheader("⛽🏦🎩 섹터/개별주 → 미국채30년 슬롯 교체 비교 (XLE / XLF / BRK-B)")
+    st.subheader("📈⛽🏦🎩 미국채30년 슬롯 교체 비교 (IEF / XLE / XLF / BRK-B)")
     st.caption("세 자산 모두 환노출(×USD/KRW) 적용. 미국채30년 자리에 하나씩 대체했을 때 기존 Faber A 대비 성과를 비교합니다.")
 
     with st.spinner("섹터/개별주 슬롯 교체 시뮬레이션 중..."):
