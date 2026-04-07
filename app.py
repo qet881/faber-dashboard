@@ -2379,6 +2379,85 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.warning(f"TIPS 슬롯 비교 오류: {e}")
 
     # ==============================
+    # 🔥 하이일드 채권(HYG) 슬롯 교체 비교
+    # ==============================
+    st.markdown("---")
+    st.subheader("🔥 하이일드 채권(HYG) 슬롯 교체 비교")
+    st.caption(
+        "하이일드 채권(HYG×USD/KRW)을 미국채30년 슬롯 또는 나스닥100 슬롯에 대체했을 때 성과를 비교합니다. "
+        "하이일드는 주식과 상관관계가 높아 방어력은 낮지만, Faber -5% 룰이 급락을 조기에 포착합니다."
+    )
+
+    with st.spinner("🔥 하이일드 슬롯 교체 시뮬레이션 중..."):
+        try:
+            # HYG × USD/KRW 데이터 로딩
+            hyg_raw = fdr.DataReader('HYG', data_start, current_date)
+            usdkrw_hyg = fdr.DataReader('USD/KRW', data_start, current_date)
+            if hyg_raw is not None and not hyg_raw.empty and usdkrw_hyg is not None and not usdkrw_hyg.empty:
+                hyg_col = 'Adj Close' if 'Adj Close' in hyg_raw.columns else 'Close'
+                hyg_raw = hyg_raw[~hyg_raw.index.duplicated(keep='last')]
+                usdkrw_hyg = usdkrw_hyg[~usdkrw_hyg.index.duplicated(keep='last')]
+                merged_hyg = pd.concat([hyg_raw[hyg_col], usdkrw_hyg['Close']], axis=1, keys=['HYG', 'FX'])
+                merged_hyg = merged_hyg.ffill().bfill().dropna()
+                hyg_krw = merged_hyg['HYG'] * merged_hyg['FX']
+                hyg_nav_data = pd.DataFrame({'Close': hyg_krw, 'Adj Close': hyg_krw}, index=hyg_krw.index)
+
+                # ── 미국채30년 슬롯 교체 ──
+                hyg_bond_data = {k: v for k, v in all_data.items()}
+                hyg_bond_data['미국채30년'] = hyg_nav_data
+                hyg_bond_data['미국채30년_모멘텀'] = hyg_nav_data
+                hyg_bond_nav = simulate_faber_strategy(bt_start_date, current_date, IC, hyg_bond_data, mode='A', price_col="Adj Close")
+
+                # ── 나스닥100 슬롯 교체 ──
+                hyg_qqq_data = {k: v for k, v in all_data.items()}
+                hyg_qqq_data['미국나스닥100'] = hyg_nav_data
+                hyg_qqq_data['미국나스닥100_모멘텀'] = hyg_nav_data
+                hyg_qqq_nav = simulate_faber_strategy(bt_start_date, current_date, IC, hyg_qqq_data, mode='A', price_col="Adj Close")
+
+                # ── 기존 Faber A ──
+                base_nav = simulate_faber_strategy(bt_start_date, current_date, IC, all_data, mode='A', price_col="Adj Close")
+
+                if hyg_bond_nav is not None and hyg_qqq_nav is not None and base_nav is not None:
+                    hyg_cmp = build_comparison_table({
+                        '기존 Faber A': base_nav,
+                        'HYG→미국채30년 교체': hyg_bond_nav,
+                        'HYG→나스닥100 교체': hyg_qqq_nav,
+                    }, IC)
+                    st.dataframe(hyg_cmp, use_container_width=True)
+
+                    # 성과 차트
+                    import plotly.graph_objects as go
+                    fig_hyg = go.Figure()
+                    for nav_df, label, color, dash in [
+                        (base_nav, '기존 Faber A', '#1f77b4', 'solid'),
+                        (hyg_bond_nav, 'HYG→미국채30년', '#d62728', 'dash'),
+                        (hyg_qqq_nav, 'HYG→나스닥100', '#ff7f0e', 'dot'),
+                    ]:
+                        ret = (nav_df['Portfolio_Value'] / IC - 1) * 100
+                        fig_hyg.add_trace(go.Scatter(
+                            x=nav_df['Date'], y=ret,
+                            mode='lines', name=label,
+                            line=dict(color=color, width=2, dash=dash),
+                            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
+                        ))
+                    fig_hyg.update_layout(
+                        title="하이일드(HYG) 슬롯 교체 비교",
+                        yaxis_title="누적 수익률 (%)",
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+                        height=420,
+                        template='plotly_dark'
+                    )
+                    st.plotly_chart(fig_hyg, use_container_width=True)
+                    st.caption(
+                        "💡 HYG→미국채30년: 방어 자산을 공격 자산으로 교체. MDD 증가 여부 주목. "
+                        "HYG→나스닥100: 미국 주식 노출을 고성장→고배당으로 교체."
+                    )
+            else:
+                st.warning("HYG×USD/KRW 데이터를 가져올 수 없습니다.")
+        except Exception as e:
+            st.warning(f"하이일드 슬롯 비교 오류: {e}")
+
+    # ==============================
     # 🔬 자산별 단독 전략 비교
     # ==============================
     st.markdown("---")
