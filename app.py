@@ -2426,16 +2426,15 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     st.dataframe(hyg_cmp, use_container_width=True)
 
                     # 성과 차트
-                    import plotly.graph_objects as go
                     fig_hyg = go.Figure()
-                    for nav_df, label, color, dash in [
+                    for _n, label, color, dash in [
                         (base_nav, '기존 Faber A', '#1f77b4', 'solid'),
                         (hyg_bond_nav, 'HYG→미국채30년', '#d62728', 'dash'),
                         (hyg_qqq_nav, 'HYG→나스닥100', '#ff7f0e', 'dot'),
                     ]:
-                        ret = (nav_df['Portfolio_Value'] / IC - 1) * 100
+                        ret = (_n['nav'] / IC - 1) * 100
                         fig_hyg.add_trace(go.Scatter(
-                            x=nav_df['Date'], y=ret,
+                            x=_n.index, y=ret,
                             mode='lines', name=label,
                             line=dict(color=color, width=2, dash=dash),
                             hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
