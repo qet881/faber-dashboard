@@ -2457,6 +2457,76 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.warning(f"하이일드 슬롯 비교 오류: {e}")
 
     # ==============================
+    # ⛽ XLE (에너지) 슬롯 교체 비교
+    # ==============================
+    st.markdown("---")
+    st.subheader("⛽ XLE (에너지 섹터) 슬롯 교체 비교")
+    st.caption(
+        "XLE(SPDR Energy ETF)를 미국채30년 슬롯에 대체했을 때 성과를 비교합니다. "
+        "XLE는 환노출 그대로 사용 (×USD/KRW). 상장일 2005년 이후 구간 백테스트."
+    )
+
+    with st.spinner("⛽ XLE 슬롯 교체 시뮬레이션 중..."):
+        try:
+            xle_raw = fdr.DataReader('XLE', data_start, current_date)
+            usdkrw_xle = fdr.DataReader('USD/KRW', data_start, current_date)
+            if xle_raw is not None and not xle_raw.empty and usdkrw_xle is not None and not usdkrw_xle.empty:
+                xle_col = 'Adj Close' if 'Adj Close' in xle_raw.columns else 'Close'
+                xle_raw = xle_raw[~xle_raw.index.duplicated(keep='last')]
+                usdkrw_xle = usdkrw_xle[~usdkrw_xle.index.duplicated(keep='last')]
+                merged_xle = pd.concat([xle_raw[xle_col], usdkrw_xle['Close']], axis=1, keys=['XLE', 'FX'])
+                merged_xle = merged_xle.ffill().bfill().dropna()
+                xle_krw = merged_xle['XLE'] * merged_xle['FX']
+                xle_nav_data = pd.DataFrame({'Close': xle_krw, 'Adj Close': xle_krw}, index=xle_krw.index)
+
+                # XLE 데이터 시작일 기준으로 백테스트 시작일 조정
+                xle_bt_start = max(bt_start_date, xle_nav_data.index[0].date() + relativedelta(months=13))
+
+                # 기존 Faber A (동일 기간)
+                base_nav_xle = simulate_faber_strategy(xle_bt_start, current_date, IC, all_data, mode='A', price_col="Adj Close")
+
+                # XLE → 미국채30년 교체
+                xle_bond_data = {k: v for k, v in all_data.items()}
+                xle_bond_data['미국채30년'] = xle_nav_data
+                xle_bond_data['미국채30년_모멘텀'] = xle_nav_data
+                xle_bond_nav = simulate_faber_strategy(xle_bt_start, current_date, IC, xle_bond_data, mode='A', price_col="Adj Close")
+
+                if base_nav_xle is not None and xle_bond_nav is not None:
+                    xle_cmp = build_comparison_table({
+                        f'기존 Faber A (Since {xle_bt_start.strftime("%Y-%m")})': base_nav_xle,
+                        'XLE→미국채30년 교체': xle_bond_nav,
+                    }, IC)
+                    st.dataframe(xle_cmp, use_container_width=True)
+
+                    fig_xle = go.Figure()
+                    for _n, label, color, dash in [
+                        (base_nav_xle, '기존 Faber A', '#1f77b4', 'solid'),
+                        (xle_bond_nav, 'XLE→미국채30년', '#2ca02c', 'dash'),
+                    ]:
+                        ret = (_n['nav'] / IC - 1) * 100
+                        fig_xle.add_trace(go.Scatter(
+                            x=_n.index, y=ret,
+                            mode='lines', name=label,
+                            line=dict(color=color, width=2, dash=dash),
+                            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
+                        ))
+                    fig_xle.update_layout(
+                        title=f"XLE 슬롯 교체 비교 (Since {xle_bt_start.strftime('%Y-%m')})",
+                        yaxis_title="누적 수익률 (%)",
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+                        height=420, template='plotly_dark'
+                    )
+                    st.plotly_chart(fig_xle, use_container_width=True)
+                    st.caption(
+                        "💡 XLE는 에너지 섹터 ETF — 유가 사이클에 크게 좌우됨. "
+                        "2014~2016년, 2020년 급락이 핵심 변수. Faber -5% 룰이 이를 얼마나 방어했는지 주목."
+                    )
+            else:
+                st.warning("XLE 또는 USD/KRW 데이터를 가져올 수 없습니다.")
+        except Exception as e:
+            st.warning(f"XLE 슬롯 비교 오류: {e}")
+
+    # ==============================
     # 🔬 자산별 단독 전략 비교
     # ==============================
     st.markdown("---")
