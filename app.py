@@ -2457,148 +2457,87 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.warning(f"하이일드 슬롯 비교 오류: {e}")
 
     # ==============================
-    # ⛽ XLE (에너지) 슬롯 교체 비교
+    # 미국 섹터/개별주 슬롯 교체 비교 (XLE / XLF / BRK-B → 미국채30년)
     # ==============================
-    st.markdown("---")
-    st.subheader("⛽ XLE (에너지 섹터) 슬롯 교체 비교")
-    st.caption(
-        "XLE(SPDR Energy ETF)를 미국채30년 슬롯에 대체했을 때 성과를 비교합니다. "
-        "XLE는 환노출 그대로 사용 (×USD/KRW). 상장일 2005년 이후 구간 백테스트."
-    )
-
-    with st.spinner("⛽ XLE 슬롯 교체 시뮬레이션 중..."):
+    def _fetch_us_etf_krw(ticker, start, end):
+        """미국 ETF × USD/KRW 합성 데이터 로딩. 실패 시 None 반환."""
         try:
-            xle_raw = fdr.DataReader('XLE', data_start, current_date)
-            usdkrw_xle = fdr.DataReader('USD/KRW', data_start, current_date)
-            if xle_raw is not None and not xle_raw.empty and usdkrw_xle is not None and not usdkrw_xle.empty:
-                xle_col = 'Adj Close' if 'Adj Close' in xle_raw.columns else 'Close'
-                xle_raw = xle_raw[~xle_raw.index.duplicated(keep='last')]
-                usdkrw_xle = usdkrw_xle[~usdkrw_xle.index.duplicated(keep='last')]
-                merged_xle = pd.concat([xle_raw[xle_col], usdkrw_xle['Close']], axis=1, keys=['XLE', 'FX'])
-                merged_xle = merged_xle.ffill().bfill().dropna()
-                xle_krw = merged_xle['XLE'] * merged_xle['FX']
-                xle_nav_data = pd.DataFrame({'Close': xle_krw, 'Adj Close': xle_krw}, index=xle_krw.index)
+            raw = fdr.DataReader(ticker, start, end)
+            fx  = fdr.DataReader('USD/KRW', start, end)
+            if raw is None or raw.empty or fx is None or fx.empty:
+                return None
+            col = 'Adj Close' if 'Adj Close' in raw.columns else 'Close'
+            raw = raw[~raw.index.duplicated(keep='last')]
+            fx  = fx[~fx.index.duplicated(keep='last')]
+            merged = pd.concat([raw[col], fx['Close']], axis=1, keys=['P', 'FX']).ffill().bfill().dropna()
+            krw = merged['P'] * merged['FX']
+            return pd.DataFrame({'Close': krw, 'Adj Close': krw}, index=krw.index)
+        except Exception:
+            return None
 
-                # XLE 데이터 시작일 기준으로 백테스트 시작일 조정
-                xle_bt_start = max(bt_start_date, xle_nav_data.index[0].date() + relativedelta(months=13))
+    def _safe_date(d):
+        """datetime 또는 date 모두 date로 통일."""
+        return d.date() if hasattr(d, 'date') else d
 
-                # 기존 Faber A (동일 기간)
-                base_nav_xle = simulate_faber_strategy(xle_bt_start, current_date, IC, all_data, mode='A', price_col="Adj Close")
+    slot_configs = [
+        ('⛽ XLE (에너지)', 'XLE',   '#2ca02c',
+         "에너지 섹터 ETF. 유가 사이클에 좌우됨. 2014~2016년, 2020년 급락이 핵심 변수."),
+        ('🏦 XLF (금융)',   'XLF',   '#e377c2',
+         "금융 섹터 ETF. 금리·신용 사이클에 민감. 2008~2009년 금융위기 구간이 핵심."),
+        ('🎩 BRK-B (버크셔)', 'BRK-B', '#9467bd',
+         "워런 버핏의 분산 지주회사. 주식이지만 자체적으로 분산된 구조."),
+    ]
 
-                # XLE → 미국채30년 교체
-                xle_bond_data = {k: v for k, v in all_data.items()}
-                xle_bond_data['미국채30년'] = xle_nav_data
-                xle_bond_data['미국채30년_모멘텀'] = xle_nav_data
-                xle_bond_nav = simulate_faber_strategy(xle_bt_start, current_date, IC, xle_bond_data, mode='A', price_col="Adj Close")
-
-                if base_nav_xle is not None and xle_bond_nav is not None:
-                    xle_cmp = build_comparison_table({
-                        f'기존 Faber A (Since {xle_bt_start.strftime("%Y-%m")})': base_nav_xle,
-                        'XLE→미국채30년 교체': xle_bond_nav,
-                    }, IC)
-                    st.dataframe(xle_cmp, use_container_width=True)
-
-                    fig_xle = go.Figure()
-                    for _n, label, color, dash in [
-                        (base_nav_xle, '기존 Faber A', '#1f77b4', 'solid'),
-                        (xle_bond_nav, 'XLE→미국채30년', '#2ca02c', 'dash'),
-                    ]:
-                        ret = (_n['nav'] / IC - 1) * 100
-                        fig_xle.add_trace(go.Scatter(
-                            x=_n.index, y=ret,
-                            mode='lines', name=label,
-                            line=dict(color=color, width=2, dash=dash),
-                            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
-                        ))
-                    fig_xle.update_layout(
-                        title=f"XLE 슬롯 교체 비교 (Since {xle_bt_start.strftime('%Y-%m')})",
-                        yaxis_title="누적 수익률 (%)",
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02),
-                        height=420, template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_xle, use_container_width=True)
-                    st.caption(
-                        "💡 XLE는 에너지 섹터 ETF — 유가 사이클에 크게 좌우됨. "
-                        "2014~2016년, 2020년 급락이 핵심 변수. Faber -5% 룰이 이를 얼마나 방어했는지 주목."
-                    )
-            else:
-                st.warning("XLE 또는 USD/KRW 데이터를 가져올 수 없습니다.")
-        except Exception as e:
-            st.warning(f"XLE 슬롯 비교 오류: {e}")
-
-    # ==============================
-    # 🏦 버크셔 해서웨이(BRK-B) 슬롯 교체 비교
-    # ==============================
     st.markdown("---")
-    st.subheader("🏦 버크셔 해서웨이(BRK-B) 슬롯 교체 비교")
-    st.caption(
-        "BRK-B(버크셔 해서웨이 B주)를 미국채30년 또는 나스닥100 슬롯에 대체했을 때 성과를 비교합니다. "
-        "버크셔는 워런 버핏의 분산 지주회사 — 주식이지만 자체적으로 분산된 구조. 환노출(×USD/KRW) 적용."
-    )
+    st.subheader("⛽🏦🎩 섹터/개별주 → 미국채30년 슬롯 교체 비교 (XLE / XLF / BRK-B)")
+    st.caption("세 자산 모두 환노출(×USD/KRW) 적용. 미국채30년 자리에 하나씩 대체했을 때 기존 Faber A 대비 성과를 비교합니다.")
 
-    with st.spinner("🏦 버크셔 슬롯 교체 시뮬레이션 중..."):
+    with st.spinner("섹터/개별주 슬롯 교체 시뮬레이션 중..."):
         try:
-            brk_raw = fdr.DataReader('BRK-B', data_start, current_date)
-            usdkrw_brk = fdr.DataReader('USD/KRW', data_start, current_date)
-            if brk_raw is not None and not brk_raw.empty and usdkrw_brk is not None and not usdkrw_brk.empty:
-                brk_col = 'Adj Close' if 'Adj Close' in brk_raw.columns else 'Close'
-                brk_raw = brk_raw[~brk_raw.index.duplicated(keep='last')]
-                usdkrw_brk = usdkrw_brk[~usdkrw_brk.index.duplicated(keep='last')]
-                merged_brk = pd.concat([brk_raw[brk_col], usdkrw_brk['Close']], axis=1, keys=['BRK', 'FX'])
-                merged_brk = merged_brk.ffill().bfill().dropna()
-                brk_krw = merged_brk['BRK'] * merged_brk['FX']
-                brk_nav_data = pd.DataFrame({'Close': brk_krw, 'Adj Close': brk_krw}, index=brk_krw.index)
+            base_nav_sec = simulate_faber_strategy(bt_start_date, current_date, IC, all_data, mode='A', price_col="Adj Close")
+            slot_results = {'기존 Faber A': base_nav_sec}
+            slot_colors  = {'기존 Faber A': ('#1f77b4', 'solid')}
+            usdkrw_shared = fdr.DataReader('USD/KRW', data_start, current_date)
 
-                # BRK-B → 미국채30년 교체
-                brk_bond_data = {k: v for k, v in all_data.items()}
-                brk_bond_data['미국채30년'] = brk_nav_data
-                brk_bond_data['미국채30년_모멘텀'] = brk_nav_data
-                brk_bond_nav = simulate_faber_strategy(bt_start_date, current_date, IC, brk_bond_data, mode='A', price_col="Adj Close")
+            for label, ticker, color, caption_txt in slot_configs:
+                nav_data = _fetch_us_etf_krw(ticker, data_start, current_date)
+                if nav_data is None:
+                    st.warning(f"{ticker} 데이터 로딩 실패")
+                    continue
+                alt_data = {k: v for k, v in all_data.items()}
+                alt_data['미국채30년'] = nav_data
+                alt_data['미국채30년_모멘텀'] = nav_data
+                # 데이터 시작일 기준 bt_start 조정
+                data_first = _safe_date(nav_data.index[0]) + relativedelta(months=13)
+                bt_s = max(_safe_date(bt_start_date), data_first)
+                alt_nav = simulate_faber_strategy(bt_s, current_date, IC, alt_data, mode='A', price_col="Adj Close")
+                if alt_nav is not None:
+                    slot_results[f'{label}→미국채30년'] = alt_nav
+                    slot_colors[f'{label}→미국채30년'] = (color, 'dash')
 
-                # BRK-B → 나스닥100 교체
-                brk_qqq_data = {k: v for k, v in all_data.items()}
-                brk_qqq_data['미국나스닥100'] = brk_nav_data
-                brk_qqq_data['미국나스닥100_모멘텀'] = brk_nav_data
-                brk_qqq_nav = simulate_faber_strategy(bt_start_date, current_date, IC, brk_qqq_data, mode='A', price_col="Adj Close")
+            if len(slot_results) > 1:
+                sec_cmp = build_comparison_table(slot_results, IC)
+                st.dataframe(sec_cmp, use_container_width=True)
 
-                base_nav_brk = simulate_faber_strategy(bt_start_date, current_date, IC, all_data, mode='A', price_col="Adj Close")
-
-                if base_nav_brk is not None and brk_bond_nav is not None and brk_qqq_nav is not None:
-                    brk_cmp = build_comparison_table({
-                        '기존 Faber A': base_nav_brk,
-                        'BRK-B→미국채30년 교체': brk_bond_nav,
-                        'BRK-B→나스닥100 교체': brk_qqq_nav,
-                    }, IC)
-                    st.dataframe(brk_cmp, use_container_width=True)
-
-                    fig_brk = go.Figure()
-                    for _n, label, color, dash in [
-                        (base_nav_brk, '기존 Faber A', '#1f77b4', 'solid'),
-                        (brk_bond_nav, 'BRK-B→미국채30년', '#9467bd', 'dash'),
-                        (brk_qqq_nav, 'BRK-B→나스닥100', '#8c564b', 'dot'),
-                    ]:
-                        ret = (_n['nav'] / IC - 1) * 100
-                        fig_brk.add_trace(go.Scatter(
-                            x=_n.index, y=ret,
-                            mode='lines', name=label,
-                            line=dict(color=color, width=2, dash=dash),
-                            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
-                        ))
-                    fig_brk.update_layout(
-                        title="버크셔 해서웨이(BRK-B) 슬롯 교체 비교",
-                        yaxis_title="누적 수익률 (%)",
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02),
-                        height=420, template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_brk, use_container_width=True)
-                    st.caption(
-                        "💡 BRK-B→미국채30년: 방어 자산을 분산 지주로 교체. MDD 증가 vs 수익 개선 트레이드오프. "
-                        "BRK-B→나스닥100: 고성장 기술주를 가치주 성격의 버크셔로 교체."
-                    )
-            else:
-                st.warning("BRK-B 또는 USD/KRW 데이터를 가져올 수 없습니다.")
+                fig_sec = go.Figure()
+                for lbl, _n in slot_results.items():
+                    c, d = slot_colors[lbl]
+                    ret = (_n['nav'] / IC - 1) * 100
+                    fig_sec.add_trace(go.Scatter(
+                        x=_n.index, y=ret, mode='lines', name=lbl,
+                        line=dict(color=c, width=2, dash=d),
+                        hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
+                    ))
+                fig_sec.update_layout(
+                    title="섹터/개별주 → 미국채30년 슬롯 교체 비교",
+                    yaxis_title="누적 수익률 (%)",
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02),
+                    height=420, template='plotly_dark'
+                )
+                st.plotly_chart(fig_sec, use_container_width=True)
+                st.caption("💡 각 자산의 Faber -5% 룰이 해당 섹터 급락을 얼마나 방어했는지 주목. MDD 변화가 핵심 판단 기준.")
         except Exception as e:
-            st.warning(f"버크셔 슬롯 비교 오류: {e}")
+            st.warning(f"섹터/개별주 슬롯 비교 오류: {e}")
 
     # ==============================
     # 🔬 자산별 단독 전략 비교
