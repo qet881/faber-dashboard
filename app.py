@@ -1789,6 +1789,45 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.caption("💡 **정적 균등**: 시장 상황에 관계없이 5자산 20%씩 유지. "
                    "Faber A보다 MDD가 크지만 CAGR도 높을 수 있음 — 타이밍 비용 vs 하락 방어 트레이드오프.")
 
+        # ── 회복력 분석 ─────────────────────────────────────
+        st.markdown("#### 📉 회복력 분석")
+        st.caption("MDD 회복기간, 평균/최장 회복기간, Underwater 비율 비교.")
+
+        def _calc_recovery(nav_s):
+            if nav_s is None or nav_s.empty: return None
+            running_max = nav_s.expanding().max()
+            underwater_ratio = (nav_s < running_max).sum() / len(nav_s)
+            periods, in_dd, peak_date = [], False, None
+            for date, val in nav_s.items():
+                curr_max = running_max[date]
+                if val < curr_max:
+                    if not in_dd:
+                        in_dd = True
+                        idx = running_max[running_max == curr_max].index
+                        peak_date = idx[-1] if len(idx) > 0 else date
+                else:
+                    if in_dd:
+                        periods.append((date - peak_date).days)
+                        in_dd = False
+            def fmt(d):
+                if d is None: return "-"
+                y, m = int(d//365), int((d%365)//30)
+                return f"{y}년 {m}개월" if y > 0 else f"{m}개월"
+            return {
+                'Underwater 비율': f"{underwater_ratio*100:.1f}%",
+                '평균 회복기간': fmt(sum(periods)/len(periods)) if periods else "-",
+                '최장 회복기간': fmt(max(periods)) if periods else "-",
+            }
+
+        rec_rows = []
+        for lbl, ns in [('Faber A ⭐', nav_df['nav'] if nav_df is not None else None),
+                        ('정적 균등 (20%×5)', eq_nav['nav'] if eq_nav is not None else None)]:
+            r = _calc_recovery(ns)
+            if r: rec_rows.append({'전략': lbl, **r})
+        if rec_rows:
+            st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
+            st.caption("💡 **Underwater 비율**: 전체 기간 중 고점 아래 있던 비중. **최장 회복기간**: 한 번 꺾인 후 회복까지 최대 시간.")
+
     # Faber A 월별 비중 변화
     st.markdown("---")
     st.subheader("📊 Faber A 월별 자산 배분 비중")
