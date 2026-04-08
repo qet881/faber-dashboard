@@ -1797,25 +1797,38 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             if nav_s is None or nav_s.empty: return None
             running_max = nav_s.expanding().max()
             underwater_ratio = (nav_s < running_max).sum() / len(nav_s)
-            periods, in_dd, peak_date = [], False, None
-            for date, val in nav_s.items():
-                curr_max = running_max[date]
-                if val < curr_max:
+            periods, in_dd, peak_idx = [], False, 0
+            nav_arr = nav_s.values
+            dates = nav_s.index
+            rmax_arr = running_max.values
+            for i in range(len(nav_arr)):
+                if nav_arr[i] < rmax_arr[i]:
                     if not in_dd:
                         in_dd = True
-                        idx = running_max[running_max == curr_max].index
-                        peak_date = idx[-1] if len(idx) > 0 else date
+                        # peak는 현재 running_max가 처음 달성된 시점
+                        peak_idx = i
+                        for j in range(i, -1, -1):
+                            if rmax_arr[j] < rmax_arr[i]:
+                                peak_idx = j + 1
+                                break
+                            if j == 0:
+                                peak_idx = 0
                 else:
                     if in_dd:
-                        periods.append((date - peak_date).days)
+                        days = (dates[i] - dates[peak_idx]).days
+                        if days > 0:
+                            periods.append(days)
                         in_dd = False
             def fmt(d):
-                if d is None: return "-"
+                if d is None or d == 0: return "-"
                 y, m = int(d//365), int((d%365)//30)
-                return f"{y}년 {m}개월" if y > 0 else f"{m}개월"
+                if y > 0 and m > 0: return f"{y}년 {m}개월"
+                if y > 0: return f"{y}년"
+                if m > 0: return f"{m}개월"
+                return f"{d}일"
             return {
                 'Underwater 비율': f"{underwater_ratio*100:.1f}%",
-                '평균 회복기간': fmt(sum(periods)/len(periods)) if periods else "-",
+                '평균 회복기간': fmt(int(sum(periods)/len(periods))) if periods else "-",
                 '최장 회복기간': fmt(max(periods)) if periods else "-",
             }
 
