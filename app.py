@@ -426,15 +426,30 @@ def fetch_deep_proxy_gold_fred(start_date, end_date):
 
 @st.cache_data(ttl=3600)
 def fetch_benchmark_etf(ticker, start_date, end_date):
-    """보조 벤치마크 ETF/펀드 데이터 로딩. 실패해도 None 반환."""
+    """보조 벤치마크 ETF/펀드 데이터 로딩. FDR 실패 시 pykrx 폴백. 실패해도 None 반환."""
+    # 1차: FDR 시도
     try:
         df = fdr.DataReader(ticker, start_date, end_date)
-        if df is None or df.empty: return None
-        df = df[~df.index.duplicated(keep='last')].sort_index()
-        if 'Close' not in df.columns: return None
-        return df
+        if df is not None and not df.empty and 'Close' in df.columns:
+            return df[~df.index.duplicated(keep='last')].sort_index()
     except Exception:
-        return None
+        pass
+    # 2차: pykrx 폴백 (비표준 티커 대응)
+    try:
+        from pykrx import stock as pykrx_stock
+        start_str = pd.Timestamp(start_date).strftime('%Y%m%d')
+        end_str   = pd.Timestamp(end_date).strftime('%Y%m%d')
+        df = pykrx_stock.get_market_ohlcv(start_str, end_str, ticker)
+        if df is None or df.empty:
+            # ETF 시도
+            df = pykrx_stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
+        if df is not None and not df.empty:
+            col = '종가' if '종가' in df.columns else df.columns[3]
+            result = pd.DataFrame({'Close': df[col], 'Adj Close': df[col]}, index=df.index)
+            return result[~result.index.duplicated(keep='last')].sort_index()
+    except Exception:
+        pass
+    return None
 
 
 def get_price_at_date(df, target_date, price_col="Close"):

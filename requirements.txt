@@ -9,3 +9,4 @@ fredapi
 requests
 openpyxl
 
+pykrx
