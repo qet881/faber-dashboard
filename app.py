@@ -435,6 +435,7 @@ def build_trading_calendar(all_data, start_date, end_date, anchor_name='코스�
             all_dates.update(df.index)
     return sorted(d for d in all_dates if start_date <= d <= end_date)
 
+@st.cache_data(ttl=3600)
 def load_market_data(start_date, end_date, use_proxy=False, hybrid=False):
     """시장 데이터 로딩.
     - use_proxy=False: 실제 ETF만 (실전 모드)
