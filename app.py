@@ -277,6 +277,7 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
             'IRLTLT01KRM156N',
             observation_start=start_ts,
             observation_end=end_ts,
+            timeout=10,
         )
         if yields_raw is None or yields_raw.empty:
             st.warning("FRED IRLTLT01KRM156N 데이터를 가져올 수 없습니다 (한국채30년 딥프록시).")
@@ -322,7 +323,7 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
             return None
         start_ts = pd.Timestamp(start_date)
         end_ts = pd.Timestamp(end_date)
-        yields_raw = fred.get_series('GS30', observation_start=start_ts, observation_end=end_ts)
+        yields_raw = fred.get_series('GS30', observation_start=start_ts, observation_end=end_ts, timeout=10)
         if yields_raw is None or yields_raw.empty:
             return None
         # 영업일 기준 리인덱싱 + ffill
