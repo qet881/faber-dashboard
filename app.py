@@ -1812,6 +1812,88 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.caption("💡 **정적 균등**: 시장 상황에 관계없이 5자산 20%씩 유지. "
                    "Faber A보다 MDD가 크지만 CAGR도 높을 수 있음 — 타이밍 비용 vs 하락 방어 트레이드오프.")
 
+        # ── 회복력 분석 ─────────────────────────────────────
+        st.markdown("#### 📉 회복력 분석 (Drawdown Recovery)")
+        st.caption("MDD 회복기간, 평균/최장 회복기간, Underwater 비율을 비교합니다.")
+
+        def calc_recovery_stats(nav_series):
+            """회복력 지표 계산."""
+            if nav_series is None or nav_series.empty:
+                return None
+            nav = nav_series.copy()
+            running_max = nav.expanding().max()
+            underwater = nav < running_max
+
+            # Underwater 비율
+            underwater_ratio = underwater.sum() / len(underwater)
+
+            # 회복 구간 탐지
+            recovery_periods = []
+            in_dd = False
+            peak_date = None
+            dd_start = None
+
+            for date, val in nav.items():
+                curr_max = running_max[date]
+                if val < curr_max:
+                    if not in_dd:
+                        in_dd = True
+                        peak_date = running_max[running_max == curr_max].index[-1] if len(running_max[running_max == curr_max]) > 0 else date
+                        dd_start = date
+                else:
+                    if in_dd:
+                        recovery_days = (date - peak_date).days
+                        recovery_periods.append(recovery_days)
+                        in_dd = False
+
+            if not recovery_periods:
+                return {
+                    'underwater_ratio': underwater_ratio,
+                    'avg_recovery_days': None,
+                    'max_recovery_days': None,
+                    'mdd_recovery_days': None,
+                }
+
+            # MDD 구간 회복기간 (최장 DD 구간)
+            mdd_recovery = max(recovery_periods)
+            avg_recovery = sum(recovery_periods) / len(recovery_periods)
+
+            return {
+                'underwater_ratio': underwater_ratio,
+                'avg_recovery_days': avg_recovery,
+                'max_recovery_days': mdd_recovery,
+                'mdd_recovery_days': mdd_recovery,
+            }
+
+        def fmt_days(d):
+            if d is None: return "-"
+            years = int(d // 365)
+            months = int((d % 365) // 30)
+            if years > 0: return f"{years}년 {months}개월"
+            return f"{months}개월"
+
+        recovery_data = []
+        for label, nav_s in [
+            ('Faber A ⭐', nav_df['nav'] if nav_df is not None else None),
+            ('정적 균등 (20%×5)', eq_nav['nav'] if eq_nav is not None else None),
+        ]:
+            s = calc_recovery_stats(nav_s)
+            if s:
+                recovery_data.append({
+                    '전략': label,
+                    'Underwater 비율': f"{s['underwater_ratio']*100:.1f}%",
+                    '평균 회복기간': fmt_days(s['avg_recovery_days']),
+                    '최장 회복기간': fmt_days(s['max_recovery_days']),
+                })
+
+        if recovery_data:
+            df_rec = pd.DataFrame(recovery_data)
+            st.dataframe(df_rec, use_container_width=True, hide_index=True)
+            st.caption(
+                "💡 **Underwater 비율**: 전체 기간 중 고점 아래에 있던 비중. "
+                "**최장 회복기간**: 한 번 고점이 꺾인 후 회복까지 걸린 최대 시간."
+            )
+
     # Faber A 월별 비중 변화
     st.markdown("---")
     st.subheader("📊 Faber A 월별 자산 배분 비중")
