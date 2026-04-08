@@ -180,34 +180,9 @@ def fetch_proxy_data(asset_name, start_date, end_date):
         if config is None: return None
         
         if config['type'] == 'synthetic_cash':
-            # 한국 콜금리(FRED: IRSTCI01KRM156N)로 연도별 실제 금리 적용.
-            # FRED 실패 시 연 2.5% 고정으로 폴백.
+            # 2000-01-01부터 영업일 기준으로 합성 현금을 생성한다.
             dates = pd.bdate_range(start=start_date, end=end_date)
             if len(dates) == 0: return None
-            try:
-                from fredapi import Fred
-                fred_key = st.secrets.get("FRED_API_KEY", None)
-                if fred_key:
-                    fred = Fred(api_key=fred_key)
-                    call_rate_raw = fred.get_series(
-                        'IRSTCI01KRM156N',
-                        observation_start=pd.Timestamp(start_date),
-                        observation_end=pd.Timestamp(end_date),
-                    )
-                    if call_rate_raw is not None and not call_rate_raw.empty:
-                        call_rate_raw = call_rate_raw.dropna()
-                        # 월별 → 영업일 리샘플링
-                        call_rate = call_rate_raw.reindex(dates).ffill().bfill()
-                        # % → 소수, 연율 → 일율
-                        daily_rates = (1 + call_rate / 100) ** (1/252) - 1
-                        base_price = 10000.0
-                        prices = [base_price]
-                        for r in daily_rates.iloc[1:]:
-                            prices.append(prices[-1] * (1 + r))
-                        return pd.DataFrame({'Close': prices, 'Adj Close': prices}, index=dates)
-            except Exception:
-                pass
-            # 폴백: 연 2.5% 고정
             annual_rate = config.get('annual_rate', 0.025)
             daily_rate = (1 + annual_rate) ** (1/252) - 1
             base_price = 10000.0
