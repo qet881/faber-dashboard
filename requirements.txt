@@ -7,5 +7,3 @@ python-dateutil
 plotly
 fredapi
 requests
-openpyxl
-

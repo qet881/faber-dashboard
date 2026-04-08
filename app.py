@@ -67,7 +67,7 @@ PROXY_ASSETS = {
 PROXY_CASH = {
     'type': 'synthetic_cash',
     'annual_rate': 0.025,
-    'note': '합성 현금 (연 2.5% 가정) — 실제ETF 이전 구간은 FRED 한국 콜금리로 대체'
+    'note': '합성 현금 (연 2.5% 가정)'
 }
 
 # 보조 벤치마크 ETF
@@ -180,34 +180,10 @@ def fetch_proxy_data(asset_name, start_date, end_date):
         if config is None: return None
         
         if config['type'] == 'synthetic_cash':
-            # 한국 콜금리(FRED: IRSTCI01KRM156N)로 연도별 실제 금리 적용.
-            # FRED 실패 시 연 2.5% 고정으로 폴백.
+            # 2000-01-01부터 영업일 기준으로 합성 현금을 생성한다.
+            # KODEX200 데이터 존재 여부와 무관하게 pd.bdate_range를 직접 사용.
             dates = pd.bdate_range(start=start_date, end=end_date)
             if len(dates) == 0: return None
-            try:
-                from fredapi import Fred
-                fred_key = st.secrets.get("FRED_API_KEY", None)
-                if fred_key:
-                    fred = Fred(api_key=fred_key)
-                    call_rate_raw = fred.get_series(
-                        'IRSTCI01KRM156N',
-                        observation_start=pd.Timestamp(start_date),
-                        observation_end=pd.Timestamp(end_date),
-                    )
-                    if call_rate_raw is not None and not call_rate_raw.empty:
-                        call_rate_raw = call_rate_raw.dropna()
-                        # 월별 → 영업일 리샘플링
-                        call_rate = call_rate_raw.reindex(dates).ffill().bfill()
-                        # % → 소수, 연율 → 일율
-                        daily_rates = (1 + call_rate / 100) ** (1/252) - 1
-                        base_price = 10000.0
-                        prices = [base_price]
-                        for r in daily_rates.iloc[1:]:
-                            prices.append(prices[-1] * (1 + r))
-                        return pd.DataFrame({'Close': prices, 'Adj Close': prices}, index=dates)
-            except Exception:
-                pass
-            # 폴백: 연 2.5% 고정
             annual_rate = config.get('annual_rate', 0.025)
             daily_rate = (1 + annual_rate) ** (1/252) - 1
             base_price = 10000.0
@@ -2075,6 +2051,154 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.dataframe(df_whipsaw, use_container_width=True, hide_index=True, height=400)
     
     # ==============================
+    # Faber A 룰 × 주식 슬롯 비교 (3×3)
+    # ==============================
+    st.markdown("---")
+    st.subheader("⚔️ Faber A 룰 × 주식 슬롯 비교 (Sortino 순위)")
+    st.caption("Faber A(-5% 이진, 현금) 룰을 고정한 채, 한국주식 3종 × 미국주식 3종 = 9개 조합 비교.")
+    
+    with st.spinner("⚔️ Faber A × 9개 슬롯 시뮬레이션 중..."):
+        faber_slot_navs = {}
+        bh_slot_navs = {}  # B&H도 함께 추적
+        for kr_name, us_name in SLOT_STRATEGIES:
+            label = f"{kr_name} + {us_name}"
+            if kr_name == '코스피200' and us_name == '나스닥100':
+                faber_slot_navs[label + " ⭐"] = nav_df
+                bh_slot_navs[label + " ⭐"] = static_nav  # 이미 계산된 동일비중 B&H
+                continue
+            if kr_name == '코스피200' and us_name == 'S&P500':
+                vdata_sp = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date)
+                if vdata_sp is not None:
+                    fnav_sp = simulate_faber_strategy(bt_start_date, current_date, IC, vdata_sp,
+                        mode='A', buffer_df=None, price_col=price_col)
+                    bh_sp = simulate_static_benchmark(bt_start_date, current_date, IC, vdata_sp, price_col=price_col)
+                    if fnav_sp is not None:
+                        faber_slot_navs[label] = fnav_sp
+                        bh_slot_navs[label] = bh_sp
+                continue
+            
+            vdata = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date)
+            if vdata is not None:
+                fnav = simulate_faber_strategy(bt_start_date, current_date, IC, vdata,
+                    mode='A', buffer_df=None, price_col=price_col)
+                bh_nav_slot = simulate_static_benchmark(bt_start_date, current_date, IC, vdata, price_col=price_col)
+                if fnav is not None:
+                    faber_slot_navs[label] = fnav
+                    bh_slot_navs[label] = bh_nav_slot
+    
+    if faber_slot_navs:
+        # 기존 비교 테이블 + Faber 궁합 지표 추가
+        slot_rows = []
+        for name, fnav_df in faber_slot_navs.items():
+            if fnav_df is None or fnav_df.empty: continue
+            fv, fr, fm, fc = calculate_performance_metrics(fnav_df, IC)
+            sharpe = calculate_sharpe_ratio(fnav_df)
+            sortino = calculate_sortino_ratio(fnav_df)
+            # B&H 성과
+            bh_df = bh_slot_navs.get(name)
+            bv, br, bm, bc = calculate_performance_metrics(bh_df, IC) if bh_df is not None and not bh_df.empty else (None, None, None, None)
+            # Faber 궁합 지표
+            faber_alpha = (fc - bc) * 100 if fc is not None and bc is not None else None
+            mdd_improve = abs(bm / fm) if fm and bm and abs(fm) > 0.001 else None
+            slot_rows.append({
+                "전략": name,
+                "CAGR": f"{fc*100:.2f}%" if fc is not None else "-",
+                "MDD (일별)": f"{fm*100:.2f}%" if fm is not None else "-",
+                "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
+                "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
+                "↓ CAGR/MDD": f"{abs(fc/fm):.2f}" if fc and fm and abs(fm) > 0.001 else "-",
+                "Faber α": f"{faber_alpha:+.2f}%p" if faber_alpha is not None else "-",
+                "MDD 개선": f"{mdd_improve:.1f}×" if mdd_improve is not None else "-",
+                "_sort": sortino if sortino is not None else -999,
+            })
+        if slot_rows:
+            df_slot = pd.DataFrame(slot_rows).sort_values("_sort", ascending=False).reset_index(drop=True)
+            df_slot.index = df_slot.index + 1
+            df_slot.index.name = "순위"
+            df_slot = df_slot.drop(columns=["_sort"])
+            st.dataframe(df_slot, use_container_width=True)
+            st.caption("💡 ⭐ = Faber A 기본 (코스피200+나스닥100). **Faber α** = Faber CAGR - B&H CAGR (높을수록 Faber가 잘 먹힘). "
+                       "**MDD 개선** = B&H MDD ÷ Faber MDD (높을수록 Faber가 위험을 많이 줄임).")
+
+    # 3개 핵심 조합 자산별 역할 비교
+    st.markdown("---")
+    st.subheader("🎯 미국주식 슬롯별 자산 역할 비교 (Faber A)")
+    st.caption("코스피200 고정, 미국주식만 S&P500/나스닥100/배당다우존스로 교체. 각 자산이 어떤 역할을 하는지 비교.")
+    
+    role_combos = [
+        ('코스피200', 'S&P500', 'S&P500'),
+        ('코스피200', '나스닥100', '나스닥100'),
+        ('코스피200', '미국배당다우존스', '배당다우존스'),
+    ]
+    
+    with st.spinner("🎯 역할 분석 중..."):
+        for kr_name, us_name, us_label in role_combos:
+            vdata = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date) if us_name != '나스닥100' else all_data
+            if vdata is None: continue
+            
+            # 월말 비중 + 기여도 계산
+            td_all = build_trading_calendar(vdata, bt_start_date, current_date)
+            me_list = []
+            for i, d in enumerate(td_all):
+                if i == len(td_all) - 1: me_list.append(d)
+                elif td_all[i+1].month != d.month or td_all[i+1].year != d.year: me_list.append(d)
+            
+            combo_attr = []
+            for i in range(len(me_list) - 1):
+                d_s, d_e = me_list[i], me_list[i+1]
+                w = calculate_faber_weights(d_s, vdata, mode='A', price_col=price_col)
+                attr = {}
+                total = 0.0
+                for an in list(ASSETS.keys()) + [CASH_NAME]:
+                    wt = w.get(an, 0.0)
+                    p1 = get_price_at_date(vdata.get(an), d_s, price_col=price_col)
+                    p2 = get_price_at_date(vdata.get(an), d_e, price_col=price_col)
+                    if p1 and p2 and p1 > 0 and wt > 0:
+                        contrib = wt * ((p2/p1) - 1) * 100
+                    else:
+                        contrib = 0.0
+                    attr[an] = contrib
+                    total += contrib
+                attr["합계"] = total
+                combo_attr.append(attr)
+            
+            if not combo_attr: continue
+            
+            # 역할 요약
+            role_summary = {}
+            for an in list(ASSETS.keys()) + [CASH_NAME]:
+                vals = [a.get(an, 0) for a in combo_attr]
+                totals = [a.get("합계", 0) for a in combo_attr]
+                pos = sum(1 for v in vals if v > 0.01)
+                neg = sum(1 for v in vals if v < -0.01)
+                zero = len(vals) - pos - neg
+                invested = len(vals) - zero
+                cumul = sum(vals)
+                crisis = [i for i, t in enumerate(totals) if t < -0.5]
+                defense = sum(1 for i in crisis if vals[i] > 0.01)
+                # 미국주식 슬롯 표시명 변경
+                display_name = us_label if an == '미국나스닥100' else an
+                role_summary[display_name] = {
+                    "누적": f"{cumul:.1f}pp",
+                    "승률": f"{pos/max(invested,1)*100:.0f}%",
+                    "방어": f"{defense}/{len(crisis)}"
+                }
+            
+            # 미국주식 슬롯만 하이라이트
+            us_vals = [a.get('미국나스닥100', 0) for a in combo_attr]
+            us_cumul = sum(us_vals)
+            us_pos = sum(1 for v in us_vals if v > 0.01)
+            us_invested = sum(1 for v in us_vals if abs(v) > 0.01)
+            
+            st.markdown(f"**{kr_name} + {us_name}** — 미국주식 슬롯({us_label}): "
+                        f"누적 {us_cumul:.1f}pp | 승률 {us_pos/max(us_invested,1)*100:.0f}% | "
+                        f"투자 {us_invested}개월")
+    
+    # 요약 테이블
+    st.info("💡 **해석**: 누적 기여가 높을수록 수익에 기여, 승률이 높을수록 안정적, "
+            "투자 개월이 많을수록 Faber 룰에 자주 들어감(=고점 근처 오래 유지).")
+
+    # ==============================
     # 🔄 채권 슬롯 교체 비교: 미국채30년 vs 미국배당다우존스
     # ==============================
     st.markdown("---")
@@ -2255,170 +2379,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.warning(f"TIPS 슬롯 비교 오류: {e}")
 
     # ==============================
-    # 🔥 하이일드 채권(HYG) 슬롯 교체 비교
-    # ==============================
-    st.markdown("---")
-    st.subheader("🔥 하이일드 채권(HYG) 슬롯 교체 비교")
-    st.caption(
-        "하이일드 채권(HYG×USD/KRW)을 미국채30년 슬롯 또는 나스닥100 슬롯에 대체했을 때 성과를 비교합니다. "
-        "하이일드는 주식과 상관관계가 높아 방어력은 낮지만, Faber -5% 룰이 급락을 조기에 포착합니다."
-    )
-
-    with st.spinner("🔥 하이일드 슬롯 교체 시뮬레이션 중..."):
-        try:
-            # HYG × USD/KRW 데이터 로딩
-            hyg_raw = fdr.DataReader('HYG', data_start, current_date)
-            usdkrw_hyg = fdr.DataReader('USD/KRW', data_start, current_date)
-            if hyg_raw is not None and not hyg_raw.empty and usdkrw_hyg is not None and not usdkrw_hyg.empty:
-                hyg_col = 'Adj Close' if 'Adj Close' in hyg_raw.columns else 'Close'
-                hyg_raw = hyg_raw[~hyg_raw.index.duplicated(keep='last')]
-                usdkrw_hyg = usdkrw_hyg[~usdkrw_hyg.index.duplicated(keep='last')]
-                merged_hyg = pd.concat([hyg_raw[hyg_col], usdkrw_hyg['Close']], axis=1, keys=['HYG', 'FX'])
-                merged_hyg = merged_hyg.ffill().bfill().dropna()
-                hyg_krw = merged_hyg['HYG'] * merged_hyg['FX']
-                hyg_nav_data = pd.DataFrame({'Close': hyg_krw, 'Adj Close': hyg_krw}, index=hyg_krw.index)
-
-                # ── 미국채30년 슬롯 교체 ──
-                hyg_bond_data = {k: v for k, v in all_data.items()}
-                hyg_bond_data['미국채30년'] = hyg_nav_data
-                hyg_bond_data['미국채30년_모멘텀'] = hyg_nav_data
-                hyg_bond_nav = simulate_faber_strategy(bt_start_date, current_date, IC, hyg_bond_data, mode='A', price_col="Adj Close")
-
-                # ── 나스닥100 슬롯 교체 ──
-                hyg_qqq_data = {k: v for k, v in all_data.items()}
-                hyg_qqq_data['미국나스닥100'] = hyg_nav_data
-                hyg_qqq_data['미국나스닥100_모멘텀'] = hyg_nav_data
-                hyg_qqq_nav = simulate_faber_strategy(bt_start_date, current_date, IC, hyg_qqq_data, mode='A', price_col="Adj Close")
-
-                # ── 기존 Faber A ──
-                base_nav = simulate_faber_strategy(bt_start_date, current_date, IC, all_data, mode='A', price_col="Adj Close")
-
-                if hyg_bond_nav is not None and hyg_qqq_nav is not None and base_nav is not None:
-                    hyg_cmp = build_comparison_table({
-                        '기존 Faber A': base_nav,
-                        'HYG→미국채30년 교체': hyg_bond_nav,
-                        'HYG→나스닥100 교체': hyg_qqq_nav,
-                    }, IC)
-                    st.dataframe(hyg_cmp, use_container_width=True)
-
-                    # 성과 차트
-                    fig_hyg = go.Figure()
-                    for _n, label, color, dash in [
-                        (base_nav, '기존 Faber A', '#1f77b4', 'solid'),
-                        (hyg_bond_nav, 'HYG→미국채30년', '#d62728', 'dash'),
-                        (hyg_qqq_nav, 'HYG→나스닥100', '#ff7f0e', 'dot'),
-                    ]:
-                        ret = (_n['nav'] / IC - 1) * 100
-                        fig_hyg.add_trace(go.Scatter(
-                            x=_n.index, y=ret,
-                            mode='lines', name=label,
-                            line=dict(color=color, width=2, dash=dash),
-                            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
-                        ))
-                    fig_hyg.update_layout(
-                        title="하이일드(HYG) 슬롯 교체 비교",
-                        yaxis_title="누적 수익률 (%)",
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02),
-                        height=420,
-                        template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_hyg, use_container_width=True)
-                    st.caption(
-                        "💡 HYG→미국채30년: 방어 자산을 공격 자산으로 교체. MDD 증가 여부 주목. "
-                        "HYG→나스닥100: 미국 주식 노출을 고성장→고배당으로 교체."
-                    )
-            else:
-                st.warning("HYG×USD/KRW 데이터를 가져올 수 없습니다.")
-        except Exception as e:
-            st.warning(f"하이일드 슬롯 비교 오류: {e}")
-
-    # ==============================
-    # 미국 섹터/개별주 슬롯 교체 비교 (XLE / XLF / BRK-B → 미국채30년)
-    # ==============================
-    def _fetch_us_etf_krw(ticker, start, end):
-        """미국 ETF × USD/KRW 합성 데이터 로딩. 실패 시 None 반환."""
-        try:
-            raw = fdr.DataReader(ticker, start, end)
-            fx  = fdr.DataReader('USD/KRW', start, end)
-            if raw is None or raw.empty or fx is None or fx.empty:
-                return None
-            col = 'Adj Close' if 'Adj Close' in raw.columns else 'Close'
-            raw = raw[~raw.index.duplicated(keep='last')]
-            fx  = fx[~fx.index.duplicated(keep='last')]
-            merged = pd.concat([raw[col], fx['Close']], axis=1, keys=['P', 'FX']).ffill().bfill().dropna()
-            krw = merged['P'] * merged['FX']
-            return pd.DataFrame({'Close': krw, 'Adj Close': krw}, index=krw.index)
-        except Exception:
-            return None
-
-    def _safe_ts(d):
-        """모든 날짜 타입을 pd.Timestamp로 통일."""
-        import pandas as _pd
-        return _pd.Timestamp(d) if not isinstance(d, _pd.Timestamp) else d
-
-    slot_configs = [
-        ('📈 IEF (미국채7-10년)', 'IEF', '#17becf',
-         "미국채 7-10년 ETF. TLT보다 듀레이션 짧아 변동성 낮음. 2002년 상장으로 시작점이 기존 Faber A(프록시 2000년)와 다름 — 참고용."),
-        ('⛽ XLE (에너지)', 'XLE',   '#2ca02c',
-         "에너지 섹터 ETF. 유가 사이클에 좌우됨. 2014~2016년, 2020년 급락이 핵심 변수."),
-        ('🏦 XLF (금융)',   'XLF',   '#e377c2',
-         "금융 섹터 ETF. 금리·신용 사이클에 민감. 2008~2009년 금융위기 구간이 핵심."),
-        ('🎩 BRK-B (버크셔)', 'BRK-B', '#9467bd',
-         "워런 버핏의 분산 지주회사. 주식이지만 자체적으로 분산된 구조."),
-    ]
-
-    st.markdown("---")
-    st.subheader("📈⛽🏦🎩 미국채30년 슬롯 교체 비교 (IEF / XLE / XLF / BRK-B)")
-    st.caption("세 자산 모두 환노출(×USD/KRW) 적용. 미국채30년 자리에 하나씩 대체했을 때 기존 Faber A 대비 성과를 비교합니다.")
-
-    with st.spinner("섹터/개별주 슬롯 교체 시뮬레이션 중..."):
-        try:
-            base_nav_sec = simulate_faber_strategy(bt_start_date, current_date, IC, all_data, mode='A', price_col="Adj Close")
-            slot_results = {'기존 Faber A': base_nav_sec}
-            slot_colors  = {'기존 Faber A': ('#1f77b4', 'solid')}
-            usdkrw_shared = fdr.DataReader('USD/KRW', data_start, current_date)
-
-            for label, ticker, color, caption_txt in slot_configs:
-                nav_data = _fetch_us_etf_krw(ticker, data_start, current_date)
-                if nav_data is None:
-                    st.warning(f"{ticker} 데이터 로딩 실패")
-                    continue
-                alt_data = {k: v for k, v in all_data.items()}
-                alt_data['미국채30년'] = nav_data
-                alt_data['미국채30년_모멘텀'] = nav_data
-                # 데이터 시작일 기준 bt_start 조정
-                data_first = _safe_ts(nav_data.index[0]) + relativedelta(months=13)
-                bt_s = max(_safe_ts(bt_start_date), data_first)
-                alt_nav = simulate_faber_strategy(bt_s, current_date, IC, alt_data, mode='A', price_col="Adj Close")
-                if alt_nav is not None:
-                    slot_results[f'{label}→미국채30년'] = alt_nav
-                    slot_colors[f'{label}→미국채30년'] = (color, 'dash')
-
-            if len(slot_results) > 1:
-                sec_cmp = build_comparison_table(slot_results, IC)
-                st.dataframe(sec_cmp, use_container_width=True)
-
-                fig_sec = go.Figure()
-                for lbl, _n in slot_results.items():
-                    c, d = slot_colors[lbl]
-                    ret = (_n['nav'] / IC - 1) * 100
-                    fig_sec.add_trace(go.Scatter(
-                        x=_n.index, y=ret, mode='lines', name=lbl,
-                        line=dict(color=c, width=2, dash=d),
-                        hovertemplate="%{x|%Y-%m-%d}<br>%{y:.1f}%<extra></extra>"
-                    ))
-                fig_sec.update_layout(
-                    title="섹터/개별주 → 미국채30년 슬롯 교체 비교",
-                    yaxis_title="누적 수익률 (%)",
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02),
-                    height=420, template='plotly_dark'
-                )
-                st.plotly_chart(fig_sec, use_container_width=True)
-                st.caption("💡 각 자산의 Faber -5% 룰이 해당 섹터 급락을 얼마나 방어했는지 주목. MDD 변화가 핵심 판단 기준.")
-        except Exception as e:
-            st.warning(f"섹터/개별주 슬롯 비교 오류: {e}")
-
-    # ==============================
     # 🔬 자산별 단독 전략 비교
     # ==============================
     st.markdown("---")
@@ -2578,154 +2538,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.dataframe(pd.DataFrame(signal_rows), use_container_width=True, hide_index=True, height=400)
     else:
         st.warning("GTAA 시뮬레이션 실패.")
-
-    # ==============================
-    # Faber A 룰 × 주식 슬롯 비교 (3×3)
-    # ==============================
-    st.markdown("---")
-    st.subheader("⚔️ Faber A 룰 × 주식 슬롯 비교 (Sortino 순위)")
-    st.caption("Faber A(-5% 이진, 현금) 룰을 고정한 채, 한국주식 3종 × 미국주식 3종 = 9개 조합 비교.")
-    
-    with st.spinner("⚔️ Faber A × 9개 슬롯 시뮬레이션 중..."):
-        faber_slot_navs = {}
-        bh_slot_navs = {}  # B&H도 함께 추적
-        for kr_name, us_name in SLOT_STRATEGIES:
-            label = f"{kr_name} + {us_name}"
-            if kr_name == '코스피200' and us_name == '나스닥100':
-                faber_slot_navs[label + " ⭐"] = nav_df
-                bh_slot_navs[label + " ⭐"] = static_nav  # 이미 계산된 동일비중 B&H
-                continue
-            if kr_name == '코스피200' and us_name == 'S&P500':
-                vdata_sp = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date)
-                if vdata_sp is not None:
-                    fnav_sp = simulate_faber_strategy(bt_start_date, current_date, IC, vdata_sp,
-                        mode='A', buffer_df=None, price_col=price_col)
-                    bh_sp = simulate_static_benchmark(bt_start_date, current_date, IC, vdata_sp, price_col=price_col)
-                    if fnav_sp is not None:
-                        faber_slot_navs[label] = fnav_sp
-                        bh_slot_navs[label] = bh_sp
-                continue
-            
-            vdata = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date)
-            if vdata is not None:
-                fnav = simulate_faber_strategy(bt_start_date, current_date, IC, vdata,
-                    mode='A', buffer_df=None, price_col=price_col)
-                bh_nav_slot = simulate_static_benchmark(bt_start_date, current_date, IC, vdata, price_col=price_col)
-                if fnav is not None:
-                    faber_slot_navs[label] = fnav
-                    bh_slot_navs[label] = bh_nav_slot
-    
-    if faber_slot_navs:
-        # 기존 비교 테이블 + Faber 궁합 지표 추가
-        slot_rows = []
-        for name, fnav_df in faber_slot_navs.items():
-            if fnav_df is None or fnav_df.empty: continue
-            fv, fr, fm, fc = calculate_performance_metrics(fnav_df, IC)
-            sharpe = calculate_sharpe_ratio(fnav_df)
-            sortino = calculate_sortino_ratio(fnav_df)
-            # B&H 성과
-            bh_df = bh_slot_navs.get(name)
-            bv, br, bm, bc = calculate_performance_metrics(bh_df, IC) if bh_df is not None and not bh_df.empty else (None, None, None, None)
-            # Faber 궁합 지표
-            faber_alpha = (fc - bc) * 100 if fc is not None and bc is not None else None
-            mdd_improve = abs(bm / fm) if fm and bm and abs(fm) > 0.001 else None
-            slot_rows.append({
-                "전략": name,
-                "CAGR": f"{fc*100:.2f}%" if fc is not None else "-",
-                "MDD (일별)": f"{fm*100:.2f}%" if fm is not None else "-",
-                "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
-                "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
-                "↓ CAGR/MDD": f"{abs(fc/fm):.2f}" if fc and fm and abs(fm) > 0.001 else "-",
-                "Faber α": f"{faber_alpha:+.2f}%p" if faber_alpha is not None else "-",
-                "MDD 개선": f"{mdd_improve:.1f}×" if mdd_improve is not None else "-",
-                "_sort": sortino if sortino is not None else -999,
-            })
-        if slot_rows:
-            df_slot = pd.DataFrame(slot_rows).sort_values("_sort", ascending=False).reset_index(drop=True)
-            df_slot.index = df_slot.index + 1
-            df_slot.index.name = "순위"
-            df_slot = df_slot.drop(columns=["_sort"])
-            st.dataframe(df_slot, use_container_width=True)
-            st.caption("💡 ⭐ = Faber A 기본 (코스피200+나스닥100). **Faber α** = Faber CAGR - B&H CAGR (높을수록 Faber가 잘 먹힘). "
-                       "**MDD 개선** = B&H MDD ÷ Faber MDD (높을수록 Faber가 위험을 많이 줄임).")
-
-    # 3개 핵심 조합 자산별 역할 비교
-    st.markdown("---")
-    st.subheader("🎯 미국주식 슬롯별 자산 역할 비교 (Faber A)")
-    st.caption("코스피200 고정, 미국주식만 S&P500/나스닥100/배당다우존스로 교체. 각 자산이 어떤 역할을 하는지 비교.")
-    
-    role_combos = [
-        ('코스피200', 'S&P500', 'S&P500'),
-        ('코스피200', '나스닥100', '나스닥100'),
-        ('코스피200', '미국배당다우존스', '배당다우존스'),
-    ]
-    
-    with st.spinner("🎯 역할 분석 중..."):
-        for kr_name, us_name, us_label in role_combos:
-            vdata = build_slot_strategy_data(all_data, kr_name, us_name, data_start, current_date) if us_name != '나스닥100' else all_data
-            if vdata is None: continue
-            
-            # 월말 비중 + 기여도 계산
-            td_all = build_trading_calendar(vdata, bt_start_date, current_date)
-            me_list = []
-            for i, d in enumerate(td_all):
-                if i == len(td_all) - 1: me_list.append(d)
-                elif td_all[i+1].month != d.month or td_all[i+1].year != d.year: me_list.append(d)
-            
-            combo_attr = []
-            for i in range(len(me_list) - 1):
-                d_s, d_e = me_list[i], me_list[i+1]
-                w = calculate_faber_weights(d_s, vdata, mode='A', price_col=price_col)
-                attr = {}
-                total = 0.0
-                for an in list(ASSETS.keys()) + [CASH_NAME]:
-                    wt = w.get(an, 0.0)
-                    p1 = get_price_at_date(vdata.get(an), d_s, price_col=price_col)
-                    p2 = get_price_at_date(vdata.get(an), d_e, price_col=price_col)
-                    if p1 and p2 and p1 > 0 and wt > 0:
-                        contrib = wt * ((p2/p1) - 1) * 100
-                    else:
-                        contrib = 0.0
-                    attr[an] = contrib
-                    total += contrib
-                attr["합계"] = total
-                combo_attr.append(attr)
-            
-            if not combo_attr: continue
-            
-            # 역할 요약
-            role_summary = {}
-            for an in list(ASSETS.keys()) + [CASH_NAME]:
-                vals = [a.get(an, 0) for a in combo_attr]
-                totals = [a.get("합계", 0) for a in combo_attr]
-                pos = sum(1 for v in vals if v > 0.01)
-                neg = sum(1 for v in vals if v < -0.01)
-                zero = len(vals) - pos - neg
-                invested = len(vals) - zero
-                cumul = sum(vals)
-                crisis = [i for i, t in enumerate(totals) if t < -0.5]
-                defense = sum(1 for i in crisis if vals[i] > 0.01)
-                # 미국주식 슬롯 표시명 변경
-                display_name = us_label if an == '미국나스닥100' else an
-                role_summary[display_name] = {
-                    "누적": f"{cumul:.1f}pp",
-                    "승률": f"{pos/max(invested,1)*100:.0f}%",
-                    "방어": f"{defense}/{len(crisis)}"
-                }
-            
-            # 미국주식 슬롯만 하이라이트
-            us_vals = [a.get('미국나스닥100', 0) for a in combo_attr]
-            us_cumul = sum(us_vals)
-            us_pos = sum(1 for v in us_vals if v > 0.01)
-            us_invested = sum(1 for v in us_vals if abs(v) > 0.01)
-            
-            st.markdown(f"**{kr_name} + {us_name}** — 미국주식 슬롯({us_label}): "
-                        f"누적 {us_cumul:.1f}pp | 승률 {us_pos/max(us_invested,1)*100:.0f}% | "
-                        f"투자 {us_invested}개월")
-    
-    # 요약 테이블
-    st.info("💡 **해석**: 누적 기여가 높을수록 수익에 기여, 승률이 높을수록 안정적, "
-            "투자 개월이 많을수록 Faber 룰에 자주 들어감(=고점 근처 오래 유지).")
 
     # ==============================
     # 🎯 급락장 분할매수 전략 백테스트
