@@ -2790,7 +2790,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
 
 def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date):
-    st.title("💎 투자")
+    st.title("투자")
     st.caption("※ 월말 종가 기준(같은 날 체결) 가정. 금현물 Faber 신호는 GLD×환율 기준.")
     st.markdown("---")
 
@@ -2890,15 +2890,15 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     try:
         # 이번 달 첫 거래일 찾기 (= 지난달 말 리밸런싱 다음날)
         month_start = current_date.replace(day=1)
-        # personal_nav_df 에서 이번 달 시작 직전(전월 마지막) NAV 구하기
+        # 실제 계좌 잔고(current_total_assets) 기준으로 계산
+        # 리밸런싱 기준일: 전월 마지막 거래일
         if personal_nav_df is not None and len(personal_nav_df) > 1:
             prev_month_rows = personal_nav_df[personal_nav_df.index < month_start]
             if len(prev_month_rows) == 0:
                 rebal_date = personal_nav_df.index[0]
-                nav_at_rebal = float(personal_nav_df["nav"].iloc[0])
             else:
                 rebal_date = prev_month_rows.index[-1]
-                nav_at_rebal = float(prev_month_rows["nav"].iloc[-1])
+            nav_at_rebal = current_total_assets  # 실제 계좌 잔고 기준
 
             # 리밸런싱 당시 Faber A 비중
             rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
@@ -2958,7 +2958,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                         "손익(원)": f"{r['손익(원)']:+,.0f}원",
                     } for r in monthly_rows])
                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
-                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 NAV {nav_at_rebal:,.0f}원 기준 추정치. 실제 체결가와 차이 있을 수 있음.")
+                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 기준, 현재 계좌 잔고 {nav_at_rebal:,.0f}원 적용. 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음.")
     except Exception as e:
         st.warning(f"이번 달 성과 계산 오류: {e}")
 
