@@ -2790,7 +2790,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
 
 def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date):
-    st.title("💎 내 자산 & 실전 리밸런싱")
+    st.title("💎 투자")
     st.caption("※ 월말 종가 기준(같은 날 체결) 가정. 금현물 Faber 신호는 GLD×환율 기준.")
     st.markdown("---")
 
@@ -2883,6 +2883,84 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 st.warning(f"📊 **현재 고점 대비 하락률: {current_dd*100:.2f}%** | "
                            f"고점: {peak_date_str} → 현재: {current_date.strftime('%Y-%m-%d')}")
     st.caption(f"📅 투자 시작일: {inv_start_date.strftime('%Y-%m-%d')} | 초기 투자금: {init_capital:,.0f}원")
+
+    # ── 이번 달 자산별 성과 ──
+    st.markdown("---")
+    st.markdown(f"#### 📅 이번 달 자산별 성과 ({current_date.strftime('%Y년 %m월')})")
+    try:
+        # 이번 달 첫 거래일 찾기 (= 지난달 말 리밸런싱 다음날)
+        month_start = current_date.replace(day=1)
+        # personal_nav_df 에서 이번 달 시작 직전(전월 마지막) NAV 구하기
+        if personal_nav_df is not None and len(personal_nav_df) > 1:
+            prev_month_rows = personal_nav_df[personal_nav_df.index < month_start]
+            if len(prev_month_rows) == 0:
+                rebal_date = personal_nav_df.index[0]
+                nav_at_rebal = float(personal_nav_df["nav"].iloc[0])
+            else:
+                rebal_date = prev_month_rows.index[-1]
+                nav_at_rebal = float(prev_month_rows["nav"].iloc[-1])
+
+            # 리밸런싱 당시 Faber A 비중
+            rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
+
+            monthly_rows = []
+            total_pnl = 0.0
+            asset_labels = list(ASSETS.keys()) + [CASH_NAME]
+            for an in asset_labels:
+                w = rebal_weights.get(an, 0.0)
+                if w < 0.001:
+                    continue
+                alloc_won = nav_at_rebal * w
+                if an == CASH_NAME:
+                    px_s = get_price_at_date(all_data.get(CASH_NAME), rebal_date, price_col=price_col) or 10000.0
+                    px_e = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or px_s
+                else:
+                    px_s = get_price_at_date(all_data.get(an), rebal_date, price_col=price_col)
+                    px_e = get_price_at_date(all_data.get(an), current_date, price_col=price_col)
+                if not px_s or px_s <= 0 or not px_e or px_e <= 0:
+                    continue
+                ret = (px_e / px_s) - 1.0
+                pnl = alloc_won * ret
+                total_pnl += pnl
+                monthly_rows.append({
+                    "자산": an,
+                    "비중": f"{w*100:.0f}%",
+                    "배분금액": f"{alloc_won:,.0f}원",
+                    "기준가(리밸)": f"{px_s:,.2f}",
+                    "현재가": f"{px_e:,.2f}",
+                    "수익률": ret * 100,
+                    "손익(원)": pnl,
+                })
+
+            if monthly_rows:
+                cols_m = st.columns(len(monthly_rows) + 1)
+                for i, row in enumerate(monthly_rows):
+                    delta_color = "normal"
+                    cols_m[i].metric(
+                        label=row["자산"],
+                        value=f"{row['수익률']:+.2f}%",
+                        delta=f"{row['손익(원)']:+,.0f}원",
+                    )
+                total_color = "🟢" if total_pnl >= 0 else "🔴"
+                cols_m[-1].metric(
+                    label="📊 이번 달 합계",
+                    value=f"{total_pnl:+,.0f}원",
+                    delta=f"{total_pnl/nav_at_rebal*100:+.2f}%" if nav_at_rebal > 0 else "N/A",
+                )
+                with st.expander("📋 이번 달 자산별 상세"):
+                    detail_df = pd.DataFrame([{
+                        "자산": r["자산"],
+                        "비중": r["비중"],
+                        "배분금액": r["배분금액"],
+                        "기준가(리밸)": r["기준가(리밸)"],
+                        "현재가": r["현재가"],
+                        "수익률": f"{r['수익률']:+.2f}%",
+                        "손익(원)": f"{r['손익(원)']:+,.0f}원",
+                    } for r in monthly_rows])
+                    st.dataframe(detail_df, use_container_width=True, hide_index=True)
+                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 NAV {nav_at_rebal:,.0f}원 기준 추정치. 실제 체결가와 차이 있을 수 있음.")
+    except Exception as e:
+        st.warning(f"이번 달 성과 계산 오류: {e}")
 
     st.markdown("---")
     st.info(f"📅 기준일: {current_dt.strftime('%Y년 %m월 %d일 %H시 %M분')}")
