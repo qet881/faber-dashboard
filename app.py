@@ -3,6 +3,7 @@ import FinanceDataReader as fdr
 import pandas as pd
 import numpy as np
 import pytz
+import requests
 
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -57,6 +58,73 @@ def get_realtime_gold_krw():
         return gld_equiv, fx_price, gold_krw
     except Exception:
         return None, None, None
+
+
+def _to_float(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float, np.number)):
+        return float(v)
+    s = str(v).replace(",", "").strip()
+    if s == "" or s == "-":
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _read_fdr_with_fallback(ticker, start_date, end_date):
+    """FDR 티커 조회(알파벳+숫자 6자리 코드는 .KS 자동 fallback)."""
+    candidates = [ticker]
+    if (
+        isinstance(ticker, str)
+        and "." not in ticker
+        and len(ticker) == 6
+        and any(ch.isalpha() for ch in ticker)
+        and any(ch.isdigit() for ch in ticker)
+    ):
+        candidates.append(f"{ticker}.KS")
+
+    for symbol in candidates:
+        try:
+            df = fdr.DataReader(symbol, start_date, end_date)
+            if df is not None and len(df) > 0:
+                return df
+        except Exception:
+            continue
+    return None
+
+
+@st.cache_data(ttl=20)
+def get_realtime_kodex_gold_active():
+    """KODEX 금액티브(0064K0) 실시간 시세 조회. 실패 시 None."""
+    try:
+        url = "https://polling.finance.naver.com/api/realtime/domestic/stock/0064K0"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://finance.naver.com",
+        }
+        resp = requests.get(url, headers=headers, timeout=5)
+        resp.raise_for_status()
+        payload = resp.json()
+        datas = payload.get("datas") or []
+        if not datas:
+            return None
+        d0 = datas[0]
+        px = _to_float(d0.get("closePrice"))
+        if px is None:
+            return None
+        return {
+            "price": px,
+            "open": _to_float(d0.get("openPrice")),
+            "high": _to_float(d0.get("highPrice")),
+            "low": _to_float(d0.get("lowPrice")),
+            "market_status": d0.get("marketStatus"),
+            "traded_at": d0.get("localTradedAt"),
+        }
+    except Exception:
+        return None
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -197,6 +265,19 @@ def get_month_end_date(date):
 def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
     try:
         if ticker == '411060' and is_momentum:
+            # 1순위: KODEX 금액티브(0064K0) 신호 기준
+            kodex_gold = _read_fdr_with_fallback('0064K0', start_date, end_date)
+            if kodex_gold is not None and not kodex_gold.empty and 'Close' in kodex_gold.columns:
+                kodex_gold = kodex_gold[~kodex_gold.index.duplicated(keep='last')].sort_index()
+                momentum_df = pd.DataFrame(index=kodex_gold.index)
+                momentum_df['Close'] = kodex_gold['Close'].astype(float)
+                if 'Adj Close' in kodex_gold.columns:
+                    momentum_df['Adj Close'] = kodex_gold['Adj Close'].astype(float)
+                else:
+                    momentum_df['Adj Close'] = momentum_df['Close']
+                return momentum_df
+
+            # 2순위 fallback: GLD×USD/KRW 합성
             gld = fdr.DataReader('GLD', start_date, end_date)
             usdkrw = fdr.DataReader('USD/KRW', start_date, end_date)
             if gld is None or gld.empty or usdkrw is None or usdkrw.empty:
@@ -209,7 +290,7 @@ def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
             synthetic_df['Close'] = merged['GLD'] * merged['USDKRW']
             synthetic_df['Adj Close'] = synthetic_df['Close']
             return synthetic_df
-        df = fdr.DataReader(ticker, start_date, end_date)
+        df = _read_fdr_with_fallback(ticker, start_date, end_date)
         if df is None or len(df) == 0: return None
         df = df[~df.index.duplicated(keep='last')].sort_index()
         if 'Close' not in df.columns: return None
@@ -652,7 +733,7 @@ def _load_hybrid_data(start_date, end_date):
     etf_gold_mom = fetch_etf_data('411060', start_date, end_date, is_momentum=True)
     step1 = _chain_link_series(deep_gold, proxy_gold)
     all_data['금현물'] = _chain_link_series(step1, etf_gold)
-    # 모멘텀: GLD×환율 기준 유지 (실전과 동일한 설계)
+    # 모멘텀 신호: 0064K0 우선, 실패 시 GLD×환율 fallback
     step1_mom = _chain_link_series(deep_gold, proxy_gold)
     all_data['금현물_모멘텀'] = _chain_link_series(step1_mom, etf_gold_mom)
 
@@ -1599,6 +1680,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             "| 금현물 | GLD × USD/KRW | ACE KRX금현물 (411060) |\n"
             "| 현금 | 합성 (연 2.5%) | 실제 MMF ETF (455890) |\n\n"
             "💡 **체인링크**: 프록시 → ETF 전환 시점에서 가격을 연결하여 수익률 연속성을 유지합니다.\n\n"
+            "⚠️ 금현물 Faber 신호는 별도 모멘텀 시리즈(0064K0 우선, 실패 시 GLD×환율 fallback)를 사용합니다.\n\n"
             "⚠️ 최근 기간의 모멘텀/기여도는 실제 ETF 데이터 기반으로 정확합니다."
         )
 
@@ -1615,7 +1697,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             '미국나스닥100': 'QQQ × USD/KRW → 실제ETF: 2000-01-01 ~ 현재',
             '한국채30년':   'ECOS국고채10년×2.5배(딥) → KOSEF국고채10년×2.5배 → 실제ETF: 2000-01-01 ~ 현재',
             '미국채30년':   'FRED GS30(딥) → TLT×환율 → 실제ETF: 2000-01-01 ~ 현재',
-            '금현물':       'FRED금현물(딥) → GLD×환율 → 실제ETF: 2000-01-01 ~ 현재',
+            '금현물':       'FRED금현물(딥) → GLD×환율 → 실제ETF: 2000-01-01 ~ 현재 (신호: 0064K0 우선)',
         }
         for name in list(ASSETS.keys()) + [CASH_NAME]:
             df = all_data.get(name)
@@ -1634,7 +1716,29 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.text(f"  {BENCHMARK_ETF['name']} ({BENCHMARK_ETF['ticker']}): ❌ 데이터 없음 (펀드코드가 FDR 미지원일 수 있음)")
 
     st.subheader("📋 현재 시장 신호 및 Faber A 추천 비중")
-    st.caption("💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. 금현물은 GLD×환율 기준.")
+    rt_kodex_bt = get_realtime_kodex_gold_active()
+    rt_kodex_px_bt = rt_kodex_bt["price"] if rt_kodex_bt else None
+    rt_gc_bt, rt_fx_bt, rt_gold_krw_bt = get_realtime_gold_krw()
+    if rt_kodex_px_bt:
+        traded_at = (rt_kodex_bt.get("traded_at") or "").replace("T", " ")[:16]
+        traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
+        st.caption(
+            f"💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. "
+            f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
+            f"(현재가: ₩{rt_kodex_px_bt:,.0f}{traded_txt})"
+        )
+    elif rt_gold_krw_bt:
+        st.caption(f"💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. "
+                   f"금현물은 GC=F 실시간 보정 기준(0064K0 fallback). "
+                   f"(GLD 환산가: ${rt_gc_bt:,.2f} | USD/KRW: ₩{rt_fx_bt:,.0f} | 원화: ₩{rt_gold_krw_bt:,.0f})")
+    else:
+        st.caption("💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
+    col_bt1, col_bt2 = st.columns([1, 4])
+    with col_bt1:
+        if st.button("🔴 금 신호 새로고침", key="bt_gold_refresh", help="0064K0/GC=F 실시간 가격 업데이트"):
+            get_realtime_kodex_gold_active.clear()
+            get_realtime_gold_krw.clear()
+            st.rerun()
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
@@ -1655,25 +1759,57 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 if p is not None: prices_list.append(p)
             if prices_list: high_12m = max(prices_list)
         signal_px = get_price_at_date(signal_data, current_date, price_col=price_col) if signal_data is not None else curr_price
+
+        # 금현물: 1순위 0064K0 실시간, 2순위 GC=F×환율 실시간 fallback
+        if ticker == '411060' and rt_kodex_px_bt:
+            signal_px = rt_kodex_px_bt
+            if signal_data is not None and not signal_data.empty:
+                _col = price_col if price_col in signal_data.columns else "Close"
+                rt_prices = [rt_kodex_px_bt]
+                for m in range(1, 12):
+                    me = get_month_end_date(current_date - relativedelta(months=m))
+                    p = get_price_at_date(signal_data, me, price_col=_col)
+                    if p is not None: rt_prices.append(p)
+                if rt_prices: high_12m = max(rt_prices)
+            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
+        elif ticker == '411060' and rt_gold_krw_bt:
+            signal_px = rt_gold_krw_bt
+            if signal_data is not None and not signal_data.empty:
+                _col = price_col if price_col in signal_data.columns else "Close"
+                rt_prices = [rt_gold_krw_bt]
+                for m in range(1, 12):
+                    me = get_month_end_date(current_date - relativedelta(months=m))
+                    p = get_price_at_date(signal_data, me, price_col=_col)
+                    if p is not None: rt_prices.append(p)
+                if rt_prices: high_12m = max(rt_prices)
+            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
+
         dist_from_high = ((signal_px / high_12m) - 1) if signal_px and high_12m and high_12m > 0 else None
         faber_w = 0.20 if near_high else 0.0
-        display_name = f"{asset_name} (GLD×환율)" if ticker == '411060' else asset_name
-        display_price = signal_px if ticker == '411060' else curr_price
         results.append({
-            "자산명": display_name, "현재가": display_price,
+            "자산명": asset_name, "현재가": signal_px if ticker == '411060' else curr_price,
             "12M고점": high_12m, "고점대비": dist_from_high,
             "모멘텀": score,
             "Faber신호": "● 투자" if near_high else "○ 현금",
-            "추천비중": faber_w
+            "추천비중": faber_w,
+            "_is_gold": ticker == '411060'
         })
     df_res = pd.DataFrame(results)
     cash_w = max(0.0, 1.0 - float(df_res["추천비중"].sum()))
     cash_p = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or 10000.0
     df_res = pd.concat([df_res, pd.DataFrame([{
         "자산명": CASH_NAME, "현재가": cash_p, "12M고점": None, "고점대비": None,
-        "모멘텀": None, "Faber신호": "-", "추천비중": cash_w
+        "모멘텀": None, "Faber신호": "-", "추천비중": cash_w, "_is_gold": False
     }])], ignore_index=True)
     df_disp = df_res.copy()
+    if rt_kodex_px_bt:
+        gold_display_name = "금현물 (0064K0🔴실시간)"
+    elif rt_gold_krw_bt:
+        gold_display_name = "금현물 (GC=F×환율🔴실시간)"
+    else:
+        gold_display_name = "금현물 (0064K0 종가기준)"
+    df_disp.loc[df_disp["_is_gold"] == True, "자산명"] = gold_display_name
+    df_disp = df_disp.drop(columns=["_is_gold"])
     df_disp["현재가"] = df_disp["현재가"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
     df_disp["12M고점"] = df_disp["12M고점"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
     df_disp["고점대비"] = df_disp["고점대비"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
@@ -2840,7 +2976,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
 def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date):
     st.title("투자")
-    st.caption("※ 월말 종가 기준(같은 날 체결) 가정. 금현물 Faber 신호는 GLD×환율 기준.")
+    st.caption("※ 월말 종가 기준(같은 날 체결) 가정. 금현물 Faber 신호는 0064K0 기준(실시간 실패 시 GC=F×환율 fallback).")
     st.markdown("---")
 
     qp = _get_query_params()
@@ -3013,17 +3149,27 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.info(f"📅 기준일: {current_dt.strftime('%Y년 %m월 %d일 %H시 %M분')}")
-    # 금 실시간 가격 (GC=F × USDKRW=X, 15분 지연)
+    rt_kodex = get_realtime_kodex_gold_active()
+    rt_kodex_px = rt_kodex["price"] if rt_kodex else None
     rt_gc, rt_fx, rt_gold_krw = get_realtime_gold_krw()
-    if rt_gold_krw:
+    if rt_kodex_px:
+        traded_at = (rt_kodex.get("traded_at") or "").replace("T", " ")[:16]
+        traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
+        st.caption(
+            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
+            f"(현재가: ₩{rt_kodex_px:,.0f}{traded_txt})"
+        )
+    elif rt_gold_krw:
         st.caption(f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
-                   f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준. "
+                   f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
                    f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
     else:
-        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
+        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
     col_rt1, col_rt2 = st.columns([1, 4])
     with col_rt1:
-        if st.button("🔴 금 신호 새로고침", help="GC=F 실시간 가격 업데이트"):
+        if st.button("🔴 금 신호 새로고침", help="0064K0/GC=F 실시간 가격 업데이트"):
+            get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
             st.rerun()
     st.subheader("📋 Faber A 신호 및 추천 비중")
@@ -3048,8 +3194,20 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             if prices_list: high_12m = max(prices_list)
         signal_px = get_price_at_date(signal_data, current_date, price_col=price_col) if signal_data is not None else curr_price
 
-        # 금현물: 실시간 GC=F×환율로 현재가 및 12M 고점 모두 덮어쓰기
-        if ticker == '411060' and rt_gold_krw:
+        # 금현물: 1순위 0064K0 실시간, 2순위 GC=F×환율 실시간 fallback
+        if ticker == '411060' and rt_kodex_px:
+            signal_px = rt_kodex_px
+            # 오늘 가격을 실시간으로 교체하여 12M 고점 재계산
+            if signal_data is not None and not signal_data.empty:
+                _col = price_col if price_col in signal_data.columns else "Close"
+                rt_prices = [rt_kodex_px]
+                for m in range(1, 12):
+                    me = get_month_end_date(current_date - relativedelta(months=m))
+                    p = get_price_at_date(signal_data, me, price_col=_col)
+                    if p is not None: rt_prices.append(p)
+                if rt_prices: high_12m = max(rt_prices)
+            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
+        elif ticker == '411060' and rt_gold_krw:
             signal_px = rt_gold_krw
             # 오늘 가격을 실시간으로 교체하여 12M 고점 재계산
             if signal_data is not None and not signal_data.empty:
@@ -3074,7 +3232,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             "_is_gold": ticker == '411060'
         })
     df_results = pd.DataFrame(results)
-    # 금현물 자산명에 (GLD×환율) 표시 (리밸런싱용 원본은 보존)
+    # 금현물 표시명은 실시간 소스에 맞게 변경 (리밸런싱용 원본은 보존)
     df_results_orig = df_results.copy()  # 리밸런싱용
     cash_weight = max(0.0, 1.0 - float(df_results["추천비중"].sum()))
     cash_price = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or 10000.0
@@ -3085,7 +3243,13 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     }])], ignore_index=True)
     df_display = df_results.copy()
     # 금현물 표시명 변경
-    df_display.loc[df_display["_is_gold"] == True, "자산명"] = "금현물 (GC=F×환율🔴실시간)" if rt_gold_krw else "금현물 (GLD×환율)"
+    if rt_kodex_px:
+        gold_display_name = "금현물 (0064K0🔴실시간)"
+    elif rt_gold_krw:
+        gold_display_name = "금현물 (GC=F×환율🔴실시간)"
+    else:
+        gold_display_name = "금현물 (0064K0 종가기준)"
+    df_display.loc[df_display["_is_gold"] == True, "자산명"] = gold_display_name
     df_display = df_display.drop(columns=["_is_gold"])
     df_display["현재가"] = df_display["현재가"].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "-")
     df_display["12M고점"] = df_display["12M고점"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
@@ -3122,7 +3286,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                     gld_near = gld_dist >= -5.0
                     st.info(f"📊 GLD×환율 12M고점: ₩{gld_high:,.0f} | 고점대비: {gld_dist:.1f}% | "
                             f"Faber 판단: {'● 투자' if gld_near else '○ 현금'}")
-                    st.caption("💡 위 Faber 신호는 ETF(411060) 가격 기준이고, 이 참고 데이터는 GLD×환율 기준입니다.")
+                    st.caption("💡 위 Faber 신호는 0064K0(우선) 기준이고, 이 참고 데이터는 GLD×환율 비교용입니다.")
         except Exception as e:
             st.warning(f"GLD 데이터 오류: {e}")
 
