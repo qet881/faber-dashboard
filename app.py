@@ -3018,6 +3018,11 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                    f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
     else:
         st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
+    # 30초마다 자동 새로고침 (실시간 금 신호 업데이트)
+    st.markdown(
+        '<meta http-equiv="refresh" content="30">',
+        unsafe_allow_html=True
+    )
     st.subheader("📋 Faber A 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
@@ -3069,7 +3074,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     }])], ignore_index=True)
     df_display = df_results.copy()
     # 금현물 표시명 변경
-    df_display.loc[df_display["_is_gold"] == True, "자산명"] = "금현물 (GLD×환율)"
+    df_display.loc[df_display["_is_gold"] == True, "자산명"] = "금현물 (GC=F×환율🔴실시간)" if rt_gold_krw else "금현물 (GLD×환율)"
     df_display = df_display.drop(columns=["_is_gold"])
     df_display["현재가"] = df_display["현재가"].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "-")
     df_display["12M고점"] = df_display["12M고점"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
