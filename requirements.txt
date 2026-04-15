@@ -8,3 +8,4 @@ plotly
 fredapi
 requests
 openpyxl
+yfinance

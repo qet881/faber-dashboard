@@ -8,6 +8,33 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 import io
+
+try:
+    import yfinance as yf
+    _YF_AVAILABLE = True
+except ImportError:
+    _YF_AVAILABLE = False
+
+
+@st.cache_data(ttl=60)
+def get_realtime_gold_krw():
+    """GC=F(금 선물) × USDKRW=X 실시간(15분 지연) 금 원화 환산가 반환.
+    실패 시 (None, None, None) 반환."""
+    if not _YF_AVAILABLE:
+        return None, None, None
+    try:
+        gc = yf.Ticker("GC=F")
+        fx = yf.Ticker("USDKRW=X")
+        gc_hist = gc.history(period="1d", interval="1m")
+        fx_hist = fx.history(period="1d", interval="1m")
+        if gc_hist.empty or fx_hist.empty:
+            return None, None, None
+        gc_price = float(gc_hist["Close"].iloc[-1])
+        fx_price = float(fx_hist["Close"].iloc[-1])
+        gold_krw = gc_price * fx_price
+        return gc_price, fx_price, gold_krw
+    except Exception:
+        return None, None, None
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -2964,8 +2991,15 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.info(f"📅 기준일: {current_dt.strftime('%Y년 %m월 %d일 %H시 %M분')}")
+    # 금 실시간 가격 (GC=F × USDKRW=X, 15분 지연)
+    rt_gc, rt_fx, rt_gold_krw = get_realtime_gold_krw()
+    if rt_gold_krw:
+        st.caption(f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+                   f"금현물은 GC=F×환율 **실시간** 기준. "
+                   f"(GC=F: ${rt_gc:,.1f} | USD/KRW: ₩{rt_fx:,.0f})")
+    else:
+        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
     st.subheader("📋 Faber A 신호 및 추천 비중")
-    st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준.")
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
@@ -2986,6 +3020,13 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 if p is not None: prices_list.append(p)
             if prices_list: high_12m = max(prices_list)
         signal_px = get_price_at_date(signal_data, current_date, price_col=price_col) if signal_data is not None else curr_price
+
+        # 금현물: 실시간 GC=F×환율로 현재가 및 신호 덮어쓰기
+        if ticker == '411060' and rt_gold_krw:
+            signal_px = rt_gold_krw
+            # 실시간 기준으로 고점대비 및 Faber 신호 재계산
+            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
+
         dist_from_high = ((signal_px / high_12m) - 1) if signal_px and high_12m and high_12m > 0 else None
         faber_w = 0.20 if near_high else 0.0
         display_price = signal_px if ticker == '411060' else curr_price
