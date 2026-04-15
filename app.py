@@ -733,9 +733,17 @@ def _load_hybrid_data(start_date, end_date):
     etf_gold_mom = fetch_etf_data('411060', start_date, end_date, is_momentum=True)
     step1 = _chain_link_series(deep_gold, proxy_gold)
     all_data['금현물'] = _chain_link_series(step1, etf_gold)
-    # 모멘텀 신호: 0064K0 우선, 실패 시 GLD×환율 fallback
-    step1_mom = _chain_link_series(deep_gold, proxy_gold)
-    all_data['금현물_모멘텀'] = _chain_link_series(step1_mom, etf_gold_mom)
+    # 모멘텀 신호:
+    # 1) 0064K0 조회 성공 시 해당 시계열만 사용(상장 이후 구간만 반영)
+    # 2) 실패 시 GLD×환율 체인링크 fallback
+    if etf_gold_mom is not None and len(etf_gold_mom) > 0:
+        mom_df = etf_gold_mom[~etf_gold_mom.index.duplicated(keep='last')].sort_index().copy()
+        if 'Adj Close' not in mom_df.columns and 'Close' in mom_df.columns:
+            mom_df['Adj Close'] = mom_df['Close']
+        all_data['금현물_모멘텀'] = mom_df
+    else:
+        step1_mom = _chain_link_series(deep_gold, proxy_gold)
+        all_data['금현물_모멘텀'] = step1_mom
 
     # ── 현금(MMF) ─────────────────────────────────────────────
     proxy_cash = fetch_proxy_data(CASH_NAME, start_date, end_date)
@@ -3224,7 +3232,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         faber_w = 0.20 if near_high else 0.0
         display_price = signal_px if ticker == '411060' else curr_price
         results.append({
-            "자산명": asset_name, "티커": ticker, "현재가": display_price,
+            "자산명": asset_name, "티커": ("0064K0" if ticker == '411060' else ticker), "현재가": display_price,
             "12M고점": high_12m, "고점대비": dist_from_high,
             "모멘텀": score,
             "Faber신호": "● 투자 (20%)" if near_high else "○ 현금 (0%)",
