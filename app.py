@@ -3085,7 +3085,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
     # 금현물 참고: GLD * USD/KRW
-    with st.expander("🥇 금현물 참고 데이터 (GLD × USD/KRW, 전일 종가 기준)"):
+    with st.expander("🥇 금현물 참고 데이터 (GLD 전일종가 × USD/KRW 실시간)"):
         try:
             gld_raw = fdr.DataReader('GLD', current_date - relativedelta(months=14), current_date)
             fx_raw = fdr.DataReader('USD/KRW', current_date - relativedelta(months=14), current_date)
