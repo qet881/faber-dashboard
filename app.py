@@ -3018,6 +3018,11 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                    f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
     else:
         st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
+    col_rt1, col_rt2 = st.columns([1, 4])
+    with col_rt1:
+        if st.button("🔴 금 신호 새로고침", help="GC=F 실시간 가격 업데이트"):
+            get_realtime_gold_krw.clear()
+            st.rerun()
     st.subheader("📋 Faber A 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
