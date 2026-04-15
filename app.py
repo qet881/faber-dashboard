@@ -551,6 +551,36 @@ def get_price_at_date(df, target_date, price_col="Close"):
     if pd.isna(v): return None
     return float(v)
 
+
+def harmonize_gold_momentum_scale(all_data, current_date, rt_kodex_price, price_col="Close"):
+    """금 모멘텀 시계열 스케일 불일치(캐시 혼선) 자동 보정."""
+    if rt_kodex_price is None or rt_kodex_price <= 0:
+        return all_data.get('금현물_모멘텀')
+
+    mom_data = all_data.get('금현물_모멘텀')
+    if mom_data is None or mom_data.empty:
+        return mom_data
+
+    mom_px = get_price_at_date(mom_data, current_date, price_col=price_col)
+    if mom_px is None or mom_px <= 0:
+        return mom_data
+
+    scale_ratio = max(mom_px, rt_kodex_price) / max(min(mom_px, rt_kodex_price), 1e-9)
+    if scale_ratio < 5:
+        return mom_data
+
+    # 0064K0 시계열을 즉시 재조회해 금 신호 스케일을 맞춘다.
+    fresh = _read_fdr_with_fallback('0064K0', current_date - relativedelta(months=18), current_date)
+    if fresh is None or fresh.empty or 'Close' not in fresh.columns:
+        return mom_data
+
+    fresh = fresh[~fresh.index.duplicated(keep='last')].sort_index()
+    fixed = pd.DataFrame(index=fresh.index)
+    fixed['Close'] = fresh['Close'].astype(float)
+    fixed['Adj Close'] = fresh['Adj Close'].astype(float) if 'Adj Close' in fresh.columns else fixed['Close']
+    all_data['금현물_모멘텀'] = fixed
+    return fixed
+
 def build_trading_calendar(all_data, start_date, end_date, anchor_name='코스피200'):
     anchor_df = all_data.get(anchor_name)
     if anchor_df is not None and len(anchor_df) > 0:
@@ -1746,11 +1776,16 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         if st.button("🔴 금 신호 새로고침", key="bt_gold_refresh", help="0064K0/GC=F 실시간 가격 업데이트"):
             get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
+            fetch_etf_data.clear()
+            _load_hybrid_data.clear()
+            load_market_data.clear()
             st.rerun()
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
         mom_data = all_data.get(f"{asset_name}_모멘텀")
+        if ticker == '411060':
+            mom_data = harmonize_gold_momentum_scale(all_data, current_date, rt_kodex_px_bt, price_col=price_col)
         curr_price = get_price_at_date(price_data, current_date, price_col=price_col)
         _, score = calculate_momentum_score_at_date(ticker, current_date, mom_data, price_col=price_col)
         signal_data = mom_data if ticker == '411060' else price_data
@@ -3179,12 +3214,17 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         if st.button("🔴 금 신호 새로고침", help="0064K0/GC=F 실시간 가격 업데이트"):
             get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
+            fetch_etf_data.clear()
+            _load_hybrid_data.clear()
+            load_market_data.clear()
             st.rerun()
     st.subheader("📋 Faber A 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
         mom_data = all_data.get(f"{asset_name}_모멘텀")
+        if ticker == '411060':
+            mom_data = harmonize_gold_momentum_scale(all_data, current_date, rt_kodex_px, price_col=price_col)
         curr_price = get_price_at_date(price_data, current_date, price_col=price_col)
         _, score = calculate_momentum_score_at_date(ticker, current_date, mom_data, price_col=price_col)
         signal_data = mom_data if ticker == '411060' else price_data
