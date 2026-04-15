@@ -19,20 +19,39 @@ except ImportError:
 @st.cache_data(ttl=60)
 def get_realtime_gold_krw():
     """GC=F(금 선물) × USDKRW=X 실시간(15분 지연) 금 원화 환산가 반환.
+    GLD 스케일(1/10 oz)에 맞게 GC=F를 GLD 직전 종가 비율로 보정.
     실패 시 (None, None, None) 반환."""
     if not _YF_AVAILABLE:
         return None, None, None
     try:
         gc = yf.Ticker("GC=F")
+        gld = yf.Ticker("GLD")
         fx = yf.Ticker("USDKRW=X")
-        gc_hist = gc.history(period="1d", interval="1m")
+
+        # 2일치 일봉: GC=F와 GLD 직전 종가 비율 계산용
+        gc_daily = gc.history(period="5d", interval="1d")
+        gld_daily = gld.history(period="5d", interval="1d")
         fx_hist = fx.history(period="1d", interval="1m")
-        if gc_hist.empty or fx_hist.empty:
+
+        if gc_daily.empty or gld_daily.empty or fx_hist.empty:
             return None, None, None
-        gc_price = float(gc_hist["Close"].iloc[-1])
+
+        # GLD/GC=F 비율 (직전 종가 기준 보정계수)
+        gc_close = float(gc_daily["Close"].iloc[-1])
+        gld_close = float(gld_daily["Close"].iloc[-1])
+        gld_gc_ratio = gld_close / gc_close  # 보통 ~0.092
+
+        # GC=F 실시간 (1분봉)
+        gc_rt_hist = gc.history(period="1d", interval="1m")
+        gc_rt = float(gc_rt_hist["Close"].iloc[-1]) if not gc_rt_hist.empty else gc_close
+
         fx_price = float(fx_hist["Close"].iloc[-1])
-        gold_krw = gc_price * fx_price
-        return gc_price, fx_price, gold_krw
+
+        # GLD 스케일 환산: GC=F_실시간 × (GLD/GC 비율) × 환율
+        gld_equiv = gc_rt * gld_gc_ratio
+        gold_krw = gld_equiv * fx_price
+
+        return gld_equiv, fx_price, gold_krw
     except Exception:
         return None, None, None
 import plotly.graph_objects as go
@@ -2995,8 +3014,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     rt_gc, rt_fx, rt_gold_krw = get_realtime_gold_krw()
     if rt_gold_krw:
         st.caption(f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
-                   f"금현물은 GC=F×환율 **실시간** 기준. "
-                   f"(GC=F: ${rt_gc:,.1f} | USD/KRW: ₩{rt_fx:,.0f})")
+                   f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준. "
+                   f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
     else:
         st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
     st.subheader("📋 Faber A 신호 및 추천 비중")
