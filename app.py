@@ -3018,11 +3018,6 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                    f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
     else:
         st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 GLD×환율 기준 (실시간 로딩 실패).")
-    # 30초마다 자동 새로고침 (실시간 금 신호 업데이트)
-    st.markdown(
-        '<meta http-equiv="refresh" content="30">',
-        unsafe_allow_html=True
-    )
     st.subheader("📋 Faber A 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
@@ -3085,7 +3080,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
     # 금현물 참고: GLD * USD/KRW
-    with st.expander("🥇 금현물 참고 데이터 (GLD × USD/KRW)"):
+    with st.expander("🥇 금현물 참고 데이터 (GLD × USD/KRW, 전일 종가 기준)"):
         try:
             gld_raw = fdr.DataReader('GLD', current_date - relativedelta(months=14), current_date)
             fx_raw = fdr.DataReader('USD/KRW', current_date - relativedelta(months=14), current_date)
