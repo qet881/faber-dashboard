@@ -3348,7 +3348,15 @@ def main():
     st.sidebar.markdown("---")
 
     with st.sidebar.expander("🥇 금 괴리율 차익거래 계산기", expanded=False):
-        st.caption("계단식 룰(3~15%) 및 청산 룰(0.5%)")
+        st.markdown("""
+**📌 매매 타이밍 룰**
+- **진입** (KRX → SOL): 매일 장 마감 후 종가 기준 괴리율 확인 → 3% 이상이면 **다음날** 매매
+- **청산** (SOL → KRX): 월말 Faber A 리밸런싱 때 같이 복귀 (괴리율 방향 무관)
+- **관망**: 0.5%~3% 구간은 대기
+- ⚠️ Faber A 금 신호 OFF 시 → SOL/KRX 모두 월말 청산
+        """)
+        st.markdown("---")
+        st.caption("계단식 비중 룰 (종가 기준 괴리율 입력)")
         krx_val = st.number_input("KRX 금 평가액", value=47998800, step=1000000, key="krx")
         sol_val = st.number_input("SOL 국제금 평가액", value=0, step=1000000, key="sol")
         premium = st.number_input("괴리율 (%)", value=3.0, step=0.5, key="prem")
@@ -3366,8 +3374,8 @@ def main():
             else:
                 trade = total_gold * tr - sol_val
                 st.write(f"**총 금:** {total_gold:,.0f}원 | **목표 SOL:** {tr*100:.0f}%")
-                if trade > 0: st.success(f"KRX 매도 → SOL 매수: {trade:,.0f}원")
-                elif trade < 0: st.warning(f"SOL 매도 → KRX 매수: {abs(trade):,.0f}원")
+                if trade > 0: st.success(f"✅ 다음날 매매 | KRX 매도 → SOL 매수: {trade:,.0f}원")
+                elif trade < 0: st.warning(f"✅ 월말 리밸런싱 때 | SOL 매도 → KRX 매수: {abs(trade):,.0f}원")
                 else: st.info("거래 불필요")
     with st.sidebar.expander("🏠 부동산 매수 신호 (이현철 전세가율)", expanded=False):
         st.caption("전세가율 기반 매수 시점 판단 (이현철 공식)")
