@@ -3048,10 +3048,18 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             if prices_list: high_12m = max(prices_list)
         signal_px = get_price_at_date(signal_data, current_date, price_col=price_col) if signal_data is not None else curr_price
 
-        # 금현물: 실시간 GC=F×환율로 현재가 및 신호 덮어쓰기
+        # 금현물: 실시간 GC=F×환율로 현재가 및 12M 고점 모두 덮어쓰기
         if ticker == '411060' and rt_gold_krw:
             signal_px = rt_gold_krw
-            # 실시간 기준으로 고점대비 및 Faber 신호 재계산
+            # 오늘 가격을 실시간으로 교체하여 12M 고점 재계산
+            if signal_data is not None and not signal_data.empty:
+                _col = price_col if price_col in signal_data.columns else "Close"
+                rt_prices = [rt_gold_krw]
+                for m in range(1, 12):
+                    me = get_month_end_date(current_date - relativedelta(months=m))
+                    p = get_price_at_date(signal_data, me, price_col=_col)
+                    if p is not None: rt_prices.append(p)
+                if rt_prices: high_12m = max(rt_prices)
             near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
 
         dist_from_high = ((signal_px / high_12m) - 1) if signal_px and high_12m and high_12m > 0 else None
