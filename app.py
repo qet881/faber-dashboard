@@ -36,12 +36,12 @@ def get_realtime_gold_krw():
         if gc_daily.empty or gld_daily.empty or fx_hist.empty:
             return None, None, None
 
-        # GLD/GC=F 비율 (직전 종가 기준 보정계수)
-        gc_close = float(gc_daily["Close"].iloc[-1])
-        gld_close = float(gld_daily["Close"].iloc[-1])
+        # GLD/GC=F 비율 (전일 종가 기준 보정계수 - iloc[-2]로 확실히 전일 종가만 사용)
+        gc_close = float(gc_daily["Close"].iloc[-2])
+        gld_close = float(gld_daily["Close"].iloc[-2])
         gld_gc_ratio = gld_close / gc_close  # 보통 ~0.092
 
-        # GC=F 실시간 (1분봉)
+        # GC=F 실시간 (1분봉) - 별도 호출 없이 gc_daily 1분봉 재사용
         gc_rt_hist = gc.history(period="1d", interval="1m")
         gc_rt = float(gc_rt_hist["Close"].iloc[-1]) if not gc_rt_hist.empty else gc_close
 
