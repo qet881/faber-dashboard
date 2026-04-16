@@ -265,7 +265,21 @@ def get_month_end_date(date):
 def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
     try:
         if ticker == '411060' and is_momentum:
-            # 1순위: KODEX 금액티브(0064K0) 신호 기준
+            synthetic_df = None
+
+            # fallback 기반(장기 구간): GLD×USD/KRW 합성
+            gld = fdr.DataReader('GLD', start_date, end_date)
+            usdkrw = fdr.DataReader('USD/KRW', start_date, end_date)
+            if gld is not None and not gld.empty and usdkrw is not None and not usdkrw.empty:
+                gld = gld[~gld.index.duplicated(keep='last')]
+                usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
+                merged = pd.concat([gld['Close'], usdkrw['Close']], axis=1, keys=['GLD', 'USDKRW'])
+                merged = merged.ffill().bfill()
+                synthetic_df = pd.DataFrame(index=merged.index)
+                synthetic_df['Close'] = merged['GLD'] * merged['USDKRW']
+                synthetic_df['Adj Close'] = synthetic_df['Close']
+
+            # 1순위(최근 구간): KODEX 금액티브(0064K0)
             kodex_gold = _read_fdr_with_fallback('0064K0', start_date, end_date)
             if kodex_gold is not None and not kodex_gold.empty and 'Close' in kodex_gold.columns:
                 kodex_gold = kodex_gold[~kodex_gold.index.duplicated(keep='last')].sort_index()
@@ -275,20 +289,10 @@ def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
                     momentum_df['Adj Close'] = kodex_gold['Adj Close'].astype(float)
                 else:
                     momentum_df['Adj Close'] = momentum_df['Close']
+                if synthetic_df is not None and not synthetic_df.empty:
+                    return _chain_link_series(synthetic_df, momentum_df)
                 return momentum_df
 
-            # 2순위 fallback: GLD×USD/KRW 합성
-            gld = fdr.DataReader('GLD', start_date, end_date)
-            usdkrw = fdr.DataReader('USD/KRW', start_date, end_date)
-            if gld is None or gld.empty or usdkrw is None or usdkrw.empty:
-                return None
-            gld = gld[~gld.index.duplicated(keep='last')]
-            usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
-            merged = pd.concat([gld['Close'], usdkrw['Close']], axis=1, keys=['GLD', 'USDKRW'])
-            merged = merged.ffill().bfill()
-            synthetic_df = pd.DataFrame(index=merged.index)
-            synthetic_df['Close'] = merged['GLD'] * merged['USDKRW']
-            synthetic_df['Adj Close'] = synthetic_df['Close']
             return synthetic_df
         df = _read_fdr_with_fallback(ticker, start_date, end_date)
         if df is None or len(df) == 0: return None
@@ -578,7 +582,7 @@ def harmonize_gold_momentum_scale(all_data, current_date, rt_kodex_price, price_
     fixed = pd.DataFrame(index=fresh.index)
     fixed['Close'] = fresh['Close'].astype(float)
     fixed['Adj Close'] = fresh['Adj Close'].astype(float) if 'Adj Close' in fresh.columns else fixed['Close']
-    all_data['금현물_모멘텀'] = fixed
+    # 표시용 계산에서만 스케일 보정을 적용하고, 원본 all_data는 유지한다.
     return fixed
 
 def build_trading_calendar(all_data, start_date, end_date, anchor_name='코스피200'):
@@ -760,19 +764,23 @@ def _load_hybrid_data(start_date, end_date):
     deep_gold = fetch_deep_proxy_gold_fred(start_date, end_date)
     proxy_gold = fetch_proxy_data('금현물', start_date, end_date)        # GLD×USD/KRW
     etf_gold = fetch_etf_data('411060', start_date, end_date)
-    etf_gold_mom = fetch_etf_data('411060', start_date, end_date, is_momentum=True)
     step1 = _chain_link_series(deep_gold, proxy_gold)
     all_data['금현물'] = _chain_link_series(step1, etf_gold)
     # 모멘텀 신호:
-    # 1) 0064K0 조회 성공 시 해당 시계열만 사용(상장 이후 구간만 반영)
-    # 2) 실패 시 GLD×환율 체인링크 fallback
-    if etf_gold_mom is not None and len(etf_gold_mom) > 0:
-        mom_df = etf_gold_mom[~etf_gold_mom.index.duplicated(keep='last')].sort_index().copy()
-        if 'Adj Close' not in mom_df.columns and 'Close' in mom_df.columns:
-            mom_df['Adj Close'] = mom_df['Close']
-        all_data['금현물_모멘텀'] = mom_df
+    # 과거(딥프록시→GLD×환율) + 최근(0064K0) 체인으로 구성해
+    # 0064K0 상장 이전 구간도 백테스트 신호가 끊기지 않게 한다.
+    step1_mom = _chain_link_series(deep_gold, proxy_gold)
+    kodex_gold = _read_fdr_with_fallback('0064K0', start_date, end_date)
+    if kodex_gold is not None and not kodex_gold.empty and 'Close' in kodex_gold.columns:
+        kodex_gold = kodex_gold[~kodex_gold.index.duplicated(keep='last')].sort_index()
+        kodex_mom = pd.DataFrame(index=kodex_gold.index)
+        kodex_mom['Close'] = kodex_gold['Close'].astype(float)
+        if 'Adj Close' in kodex_gold.columns:
+            kodex_mom['Adj Close'] = kodex_gold['Adj Close'].astype(float)
+        else:
+            kodex_mom['Adj Close'] = kodex_mom['Close']
+        all_data['금현물_모멘텀'] = _chain_link_series(step1_mom, kodex_mom)
     else:
-        step1_mom = _chain_link_series(deep_gold, proxy_gold)
         all_data['금현물_모멘텀'] = step1_mom
 
     # ── 현금(MMF) ─────────────────────────────────────────────
@@ -1752,113 +1760,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.text(f"  {BENCHMARK_ETF['name']}: {benchmark_raw.index.min().strftime('%Y-%m-%d')} ~ {benchmark_raw.index.max().strftime('%Y-%m-%d')}")
         else:
             st.text(f"  {BENCHMARK_ETF['name']} ({BENCHMARK_ETF['ticker']}): ❌ 데이터 없음 (펀드코드가 FDR 미지원일 수 있음)")
-
-    st.subheader("📋 현재 시장 신호 및 Faber A 추천 비중")
-    rt_kodex_bt = get_realtime_kodex_gold_active()
-    rt_kodex_px_bt = rt_kodex_bt["price"] if rt_kodex_bt else None
-    rt_gc_bt, rt_fx_bt, rt_gold_krw_bt = get_realtime_gold_krw()
-    if rt_kodex_px_bt:
-        traded_at = (rt_kodex_bt.get("traded_at") or "").replace("T", " ")[:16]
-        traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
-        st.caption(
-            f"💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. "
-            f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
-            f"(현재가: ₩{rt_kodex_px_bt:,.0f}{traded_txt})"
-        )
-    elif rt_gold_krw_bt:
-        st.caption(f"💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. "
-                   f"금현물은 GC=F 실시간 보정 기준(0064K0 fallback). "
-                   f"(GLD 환산가: ${rt_gc_bt:,.2f} | USD/KRW: ₩{rt_fx_bt:,.0f} | 원화: ₩{rt_gold_krw_bt:,.0f})")
-    else:
-        st.caption("💡 **Faber A 룰**: 12개월 고점 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
-    col_bt1, col_bt2 = st.columns([1, 4])
-    with col_bt1:
-        if st.button("🔴 금 신호 새로고침", key="bt_gold_refresh", help="0064K0/GC=F 실시간 가격 업데이트"):
-            get_realtime_kodex_gold_active.clear()
-            get_realtime_gold_krw.clear()
-            fetch_etf_data.clear()
-            _load_hybrid_data.clear()
-            load_market_data.clear()
-            st.rerun()
-    results = []
-    for asset_name, ticker in ASSETS.items():
-        price_data = all_data.get(asset_name)
-        mom_data = all_data.get(f"{asset_name}_모멘텀")
-        if ticker == '411060':
-            mom_data = harmonize_gold_momentum_scale(all_data, current_date, rt_kodex_px_bt, price_col=price_col)
-        curr_price = get_price_at_date(price_data, current_date, price_col=price_col)
-        _, score = calculate_momentum_score_at_date(ticker, current_date, mom_data, price_col=price_col)
-        signal_data = mom_data if ticker == '411060' else price_data
-        near_high = is_near_12month_high(signal_data, current_date, threshold=0.05, price_col=price_col)
-        high_12m = None
-        if signal_data is not None and not signal_data.empty:
-            col = price_col if price_col in signal_data.columns else "Close"
-            prices_list = []
-            sp = get_price_at_date(signal_data, current_date, price_col=col)
-            if sp is not None: prices_list.append(sp)
-            for m in range(1, 12):
-                me = get_month_end_date(current_date - relativedelta(months=m))
-                p = get_price_at_date(signal_data, me, price_col=col)
-                if p is not None: prices_list.append(p)
-            if prices_list: high_12m = max(prices_list)
-        signal_px = get_price_at_date(signal_data, current_date, price_col=price_col) if signal_data is not None else curr_price
-
-        # 금현물: 1순위 0064K0 실시간, 2순위 GC=F×환율 실시간 fallback
-        if ticker == '411060' and rt_kodex_px_bt:
-            signal_px = rt_kodex_px_bt
-            if signal_data is not None and not signal_data.empty:
-                _col = price_col if price_col in signal_data.columns else "Close"
-                rt_prices = [rt_kodex_px_bt]
-                for m in range(1, 12):
-                    me = get_month_end_date(current_date - relativedelta(months=m))
-                    p = get_price_at_date(signal_data, me, price_col=_col)
-                    if p is not None: rt_prices.append(p)
-                if rt_prices: high_12m = max(rt_prices)
-            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
-        elif ticker == '411060' and rt_gold_krw_bt:
-            signal_px = rt_gold_krw_bt
-            if signal_data is not None and not signal_data.empty:
-                _col = price_col if price_col in signal_data.columns else "Close"
-                rt_prices = [rt_gold_krw_bt]
-                for m in range(1, 12):
-                    me = get_month_end_date(current_date - relativedelta(months=m))
-                    p = get_price_at_date(signal_data, me, price_col=_col)
-                    if p is not None: rt_prices.append(p)
-                if rt_prices: high_12m = max(rt_prices)
-            near_high = (signal_px / high_12m - 1) >= -0.05 if high_12m and high_12m > 0 else near_high
-
-        dist_from_high = ((signal_px / high_12m) - 1) if signal_px and high_12m and high_12m > 0 else None
-        faber_w = 0.20 if near_high else 0.0
-        results.append({
-            "자산명": asset_name, "현재가": signal_px if ticker == '411060' else curr_price,
-            "12M고점": high_12m, "고점대비": dist_from_high,
-            "모멘텀": score,
-            "Faber신호": "● 투자" if near_high else "○ 현금",
-            "추천비중": faber_w,
-            "_is_gold": ticker == '411060'
-        })
-    df_res = pd.DataFrame(results)
-    cash_w = max(0.0, 1.0 - float(df_res["추천비중"].sum()))
-    cash_p = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or 10000.0
-    df_res = pd.concat([df_res, pd.DataFrame([{
-        "자산명": CASH_NAME, "현재가": cash_p, "12M고점": None, "고점대비": None,
-        "모멘텀": None, "Faber신호": "-", "추천비중": cash_w, "_is_gold": False
-    }])], ignore_index=True)
-    df_disp = df_res.copy()
-    if rt_kodex_px_bt:
-        gold_display_name = "금현물 (0064K0🔴실시간)"
-    elif rt_gold_krw_bt:
-        gold_display_name = "금현물 (GC=F×환율🔴실시간)"
-    else:
-        gold_display_name = "금현물 (0064K0 종가기준)"
-    df_disp.loc[df_disp["_is_gold"] == True, "자산명"] = gold_display_name
-    df_disp = df_disp.drop(columns=["_is_gold"])
-    df_disp["현재가"] = df_disp["현재가"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
-    df_disp["12M고점"] = df_disp["12M고점"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
-    df_disp["고점대비"] = df_disp["고점대비"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
-    df_disp["모멘텀"] = df_disp["모멘텀"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
-    df_disp["추천비중"] = df_disp["추천비중"].apply(lambda x: f"{x*100:.0f}%")
-    st.dataframe(df_disp, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.subheader(f"📊 Faber A 전략 과거 성과 (Since {bt_start_date.strftime('%Y-%m')})")
