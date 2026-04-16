@@ -960,9 +960,13 @@ def simulate_gtaa_strategy(start_date, end_date, initial_capital, all_data, pric
         else: cash_target += initial_capital * w
     holdings[CASH_NAME] = cash_target / cash_px if cash_px > 0 else 0.0
     daily_nav = []
+    last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
-        pv = _calc_portfolio_value(holdings, date, all_data, price_col)
-        if pv <= 0: pv = initial_capital
+        pv_raw = _calc_portfolio_value(holdings, date, all_data, price_col)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
         daily_nav.append({"date": date, "nav": pv})
         is_last = (i == len(trading_dates) - 1)
         if not is_last:
@@ -1074,27 +1078,36 @@ def simulate_faber_strategy(start_date, end_date, initial_capital, all_data, mod
         else: cash_target += initial_capital * w
     
     buf_w = iw.get(BUFFER_KEY, 0.0)
-    if buf_w > 0 and buffer_df is not None:
-        bpx = get_price_at_date(buffer_df, actual_start, price_col=price_col)
-        if bpx and bpx > 0: holdings[BUFFER_KEY] = (initial_capital * buf_w) / bpx
-        else: cash_target += initial_capital * buf_w
+    if buf_w > 0:
+        if buffer_df is not None:
+            bpx = get_price_at_date(buffer_df, actual_start, price_col=price_col)
+            if bpx and bpx > 0:
+                holdings[BUFFER_KEY] = (initial_capital * buf_w) / bpx
+            else:
+                cash_target += initial_capital * buf_w
+        else:
+            cash_target += initial_capital * buf_w
     
     holdings[CASH_NAME] = cash_target / cash_px if cash_px > 0 else 0.0
     
     daily_nav = []
+    last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
         # 포트폴리오 가치 계산
-        pv = 0.0
+        pv_raw = 0.0
         for an in ASSETS:
             px = get_price_at_date(all_data.get(an), date, price_col=price_col)
-            if px and px > 0: pv += holdings.get(an, 0.0) * px
+            if px and px > 0: pv_raw += holdings.get(an, 0.0) * px
         if buffer_df is not None:
             bpx = get_price_at_date(buffer_df, date, price_col=price_col)
-            if bpx and bpx > 0: pv += holdings.get(BUFFER_KEY, 0.0) * bpx
+            if bpx and bpx > 0: pv_raw += holdings.get(BUFFER_KEY, 0.0) * bpx
         cpx = get_price_at_date(all_data.get(CASH_NAME), date, price_col=price_col)
         if cpx is None or cpx <= 0: cpx = 10000.0
-        pv += holdings.get(CASH_NAME, 0.0) * cpx
-        if pv <= 0: pv = initial_capital
+        pv_raw += holdings.get(CASH_NAME, 0.0) * cpx
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
         daily_nav.append({"date": date, "nav": pv})
         
         # 월말 리밸런싱
@@ -1111,10 +1124,17 @@ def simulate_faber_strategy(start_date, end_date, initial_capital, all_data, mod
                 if px and px > 0: holdings[an] = (pv * w) / px
                 else: ct += pv * w; holdings[an] = 0.0
             bw = tw.get(BUFFER_KEY, 0.0)
-            if bw > 0 and buffer_df is not None:
-                bpx = get_price_at_date(buffer_df, date, price_col=price_col)
-                if bpx and bpx > 0: holdings[BUFFER_KEY] = (pv * bw) / bpx
-                else: ct += pv * bw; holdings[BUFFER_KEY] = 0.0
+            if bw > 0:
+                if buffer_df is not None:
+                    bpx = get_price_at_date(buffer_df, date, price_col=price_col)
+                    if bpx and bpx > 0:
+                        holdings[BUFFER_KEY] = (pv * bw) / bpx
+                    else:
+                        ct += pv * bw
+                        holdings[BUFFER_KEY] = 0.0
+                else:
+                    ct += pv * bw
+                    holdings[BUFFER_KEY] = 0.0
             else:
                 holdings[BUFFER_KEY] = 0.0
             holdings[CASH_NAME] = ct / cpx if cpx > 0 else 0.0
@@ -1165,6 +1185,15 @@ def _calc_portfolio_value(holdings, date, all_data, price_col):
     pv += holdings.get(CASH_NAME, 0.0) * cash_px
     return pv
 
+
+def _safe_nav_value(nav_value, fallback_nav):
+    """Invalid NAV(<=0/NaN/inf) 발생 시 직전 유효 NAV를 사용해 연속성 유지."""
+    if nav_value is None or not np.isfinite(nav_value) or nav_value <= 0:
+        if fallback_nav is not None and np.isfinite(fallback_nav) and fallback_nav > 0:
+            return float(fallback_nav)
+        return None
+    return float(nav_value)
+
 def simulate_daily_nav_with_attribution(start_date, end_date, initial_capital, all_data, price_col="Close"):
     trading_dates = build_trading_calendar(all_data, start_date, end_date)
     if len(trading_dates) == 0: return None, None, None, None
@@ -1179,10 +1208,14 @@ def simulate_daily_nav_with_attribution(start_date, end_date, initial_capital, a
     daily_nav, monthly_attribution, monthly_rebalance_dates = [], [], [actual_start]
     monthly_weights_history = [{"date": actual_start, **{k: v for k, v in initial_weights.items()}}]
     month_start_nav, month_start_date, month_start_weights = initial_capital, actual_start, current_weights.copy()
+    last_valid_nav = float(first_nav if first_nav and first_nav > 0 else initial_capital)
 
     for i, date in enumerate(trading_dates):
-        portfolio_value = _calc_portfolio_value(holdings, date, all_data, price_col)
-        if portfolio_value <= 0: portfolio_value = month_start_nav if month_start_nav > 0 else initial_capital
+        portfolio_raw = _calc_portfolio_value(holdings, date, all_data, price_col)
+        portfolio_value = _safe_nav_value(portfolio_raw, last_valid_nav)
+        if portfolio_value is None:
+            portfolio_value = month_start_nav if month_start_nav > 0 else initial_capital
+        last_valid_nav = portfolio_value
         daily_nav.append({"date": date, "nav": portfolio_value})
         is_last_day = (i == len(trading_dates) - 1)
         if not is_last_day:
@@ -1240,9 +1273,13 @@ def simulate_static_benchmark(start_date, end_date, initial_capital, all_data, p
     rebalance_holdings(initial_capital, actual_start, static_weights, holdings, all_data, price_col=price_col)
 
     daily_nav = []
+    last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
-        pv = _calc_portfolio_value(holdings, date, all_data, price_col)
-        if pv <= 0: pv = initial_capital
+        pv_raw = _calc_portfolio_value(holdings, date, all_data, price_col)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
         daily_nav.append({"date": date, "nav": pv})
 
         is_last_day = (i == len(trading_dates) - 1)
@@ -1288,12 +1325,15 @@ def simulate_single_asset_faber(asset_name, start_date, end_date, initial_capita
         holdings_cash = initial_capital / cash_px0
 
     daily_nav = []
+    last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
         asset_px = get_price_at_date(asset_df, date, price_col=price_col)
         cash_px = get_price_at_date(cash_df, date, price_col=price_col) or 10000.0
-        pv = (holdings_asset * asset_px if asset_px else 0.0) + holdings_cash * cash_px
-        if pv <= 0:
-            pv = initial_capital
+        pv_raw = (holdings_asset * asset_px if asset_px else 0.0) + holdings_cash * cash_px
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
         daily_nav.append({"date": date, "nav": pv})
 
         is_last = (i == len(trading_dates) - 1) or (
@@ -1352,10 +1392,13 @@ def simulate_equal_weight_no_cash(start_date, end_date, initial_capital, all_dat
     holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
     rebalance_holdings(initial_capital, trading_dates[0], eq_w, holdings, all_data, price_col=price_col)
     daily_nav = []
+    last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
-        pv = _calc_portfolio_value(holdings, date, all_data, price_col)
-        if pv <= 0:
-            pv = initial_capital
+        pv_raw = _calc_portfolio_value(holdings, date, all_data, price_col)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
         daily_nav.append({"date": date, "nav": pv})
         is_last = (i == len(trading_dates) - 1) or (
             trading_dates[i + 1].month != date.month or
@@ -2037,12 +2080,12 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 }), use_container_width=True, hide_index=True)
 
     # Faber A 월별 자산 수익 기여도 분석
+    faber_attr_list = []
     if faber_weight_records and len(faber_weight_records) > 1:
         st.markdown("---")
         st.subheader("🔍 Faber A 월별 자산 수익 기여도 분석")
         
         # 월말 비중 + 다음달 자산 수익률 → 기여도
-        faber_attr_list = []
         for i in range(len(faber_weight_records) - 1):
             w_rec = faber_weight_records[i]
             next_rec = faber_weight_records[i + 1]
