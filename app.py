@@ -99,32 +99,101 @@ def _read_fdr_with_fallback(ticker, start_date, end_date):
 @st.cache_data(ttl=20)
 def get_realtime_kodex_gold_active():
     """KODEX 금액티브(0064K0) 실시간 시세 조회. 실패 시 None."""
-    try:
-        url = "https://polling.finance.naver.com/api/realtime/domestic/stock/0064K0"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://finance.naver.com",
-        }
-        resp = requests.get(url, headers=headers, timeout=5)
-        resp.raise_for_status()
-        payload = resp.json()
-        datas = payload.get("datas") or []
-        if not datas:
-            return None
-        d0 = datas[0]
-        px = _to_float(d0.get("closePrice"))
-        if px is None:
-            return None
-        return {
+    url = "https://polling.finance.naver.com/api/realtime/domestic/stock/0064K0"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://finance.naver.com",
+    }
+    for _ in range(3):
+        try:
+            resp = requests.get(url, headers=headers, timeout=5)
+            resp.raise_for_status()
+            payload = resp.json()
+            datas = payload.get("datas") or []
+            if not datas:
+                continue
+            d0 = datas[0]
+            px = _to_float(d0.get("closePrice"))
+            if px is None:
+                continue
+            return {
+                "price": px,
+                "open": _to_float(d0.get("openPrice")),
+                "high": _to_float(d0.get("highPrice")),
+                "low": _to_float(d0.get("lowPrice")),
+                "market_status": d0.get("marketStatus"),
+                "traded_at": d0.get("localTradedAt"),
+            }
+        except Exception:
+            continue
+    return None
+
+
+def resolve_gold_signal_runtime(current_dt, stable_mode=True, sticky_minutes=120):
+    """금 신호용 실시간 가격 소스 결정.
+    우선순위:
+    1) 0064K0 실시간
+    2) (stable_mode일 때만) 최근 0064K0 성공값(sticky_minutes 이내)
+    3) (stable_mode일 때만) GC=F × USD/KRW 환산 실시간
+    4) 종가 기준
+    """
+    sticky_key = "_gold_kodex_last_success"
+    kodex = get_realtime_kodex_gold_active()
+    if kodex and _to_float(kodex.get("price")) and _to_float(kodex.get("price")) > 0:
+        px = float(kodex["price"])
+        st.session_state[sticky_key] = {
             "price": px,
-            "open": _to_float(d0.get("openPrice")),
-            "high": _to_float(d0.get("highPrice")),
-            "low": _to_float(d0.get("lowPrice")),
-            "market_status": d0.get("marketStatus"),
-            "traded_at": d0.get("localTradedAt"),
+            "saved_at": current_dt,
+            "traded_at": kodex.get("traded_at"),
         }
-    except Exception:
-        return None
+        return {
+            "source": "KODEX_REALTIME",
+            "price": px,
+            "kodex": kodex,
+            "gc": None,
+            "fx": None,
+            "sticky_age_min": None,
+        }
+
+    if stable_mode:
+        last = st.session_state.get(sticky_key)
+        if isinstance(last, dict):
+            saved_at = last.get("saved_at")
+            last_px = _to_float(last.get("price"))
+            if isinstance(saved_at, datetime) and last_px and last_px > 0:
+                age_min = (current_dt - saved_at).total_seconds() / 60.0
+                if age_min <= sticky_minutes:
+                    return {
+                        "source": "KODEX_STICKY",
+                        "price": float(last_px),
+                        "kodex": {
+                            "price": float(last_px),
+                            "traded_at": last.get("traded_at"),
+                        },
+                        "gc": None,
+                        "fx": None,
+                        "sticky_age_min": age_min,
+                    }
+
+        rt_gc, rt_fx, rt_gold_krw = get_realtime_gold_krw()
+        if rt_gold_krw and rt_gold_krw > 0:
+            return {
+                "source": "GC_FX_REALTIME",
+                "price": float(rt_gold_krw),
+                "kodex": None,
+                "gc": rt_gc,
+                "fx": rt_fx,
+                "sticky_age_min": None,
+            }
+
+    return {
+        "source": "NONE",
+        "price": None,
+        "kodex": None,
+        "gc": None,
+        "fx": None,
+        "sticky_age_min": None,
+    }
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -2978,6 +3047,14 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     current_total_assets = float(bal_gen + bal_isa_a + bal_isa_b)
     st.sidebar.markdown("---")
     st.sidebar.metric("총 운용 자산", f"{current_total_assets:,.0f}원")
+    gold_rt_mode_label = st.sidebar.radio(
+        "금 실시간 소스",
+        ["안정모드 (권장)", "엄격모드 (0064K0만)"],
+        index=0,
+        key="gold_rt_mode",
+    )
+    st.sidebar.caption("안정모드: 0064K0 실패 시 최근 성공값(최대 120분) → GC=F×환율 fallback")
+    gold_stable_mode = (gold_rt_mode_label == "안정모드 (권장)")
 
     # data_start는 bt_start_date/inv_start_date 중 더 이른 날 - 18개월이므로
     # all_data 단일 로딩으로 역대 MDD 계산까지 커버 가능 (M-1: 이중 호출 제거)
@@ -3117,31 +3194,46 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.info(f"📅 기준일: {current_dt.strftime('%Y년 %m월 %d일 %H시 %M분')}")
-    rt_kodex = get_realtime_kodex_gold_active()
-    rt_kodex_px = rt_kodex["price"] if rt_kodex else None
-    rt_gc, rt_fx, rt_gold_krw = get_realtime_gold_krw()
-    if rt_kodex_px:
-        traded_at = (rt_kodex.get("traded_at") or "").replace("T", " ")[:16]
+    gold_rt = resolve_gold_signal_runtime(current_dt, stable_mode=gold_stable_mode, sticky_minutes=120)
+    gold_source = gold_rt["source"]
+    rt_kodex = gold_rt["kodex"]
+    rt_kodex_px = gold_rt["price"] if gold_source in ("KODEX_REALTIME", "KODEX_STICKY") else None
+    rt_gold_krw = gold_rt["price"] if gold_source == "GC_FX_REALTIME" else None
+    rt_gc = gold_rt["gc"]
+    rt_fx = gold_rt["fx"]
+
+    if gold_source == "KODEX_REALTIME":
+        traded_at = ((rt_kodex or {}).get("traded_at") or "").replace("T", " ")[:16]
         traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
         st.caption(
             f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
             f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f}{traded_txt})"
         )
-    elif rt_gold_krw:
-        st.caption(f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
-                   f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
-                   f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})")
-    else:
+    elif gold_source == "KODEX_STICKY":
+        age_min = gold_rt.get("sticky_age_min")
+        age_txt = f"{int(age_min):d}분 전 값" if age_min is not None else "최근 성공값"
+        st.caption(
+            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"금현물은 0064K0 최근 성공값({age_txt}) 기준. "
+            f"(현재가: ₩{rt_kodex_px:,.0f})"
+        )
+    elif gold_source == "GC_FX_REALTIME":
+        st.caption(
+            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
+            f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})"
+        )
+    elif gold_stable_mode:
         st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
+    else:
+        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
     col_rt1, col_rt2 = st.columns([1, 4])
     with col_rt1:
-        if st.button("🔴 금 신호 새로고침", help="0064K0/GC=F 실시간 가격 업데이트"):
+        if st.button("🔄 신호표 새로고침", help="Faber A 신호 및 추천 비중 섹션만 새로 계산"):
+            # 전체 데이터 캐시는 유지하고, 신호표 계산에 필요한 실시간 소스만 갱신
             get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
-            fetch_etf_data.clear()
-            _load_hybrid_data.clear()
-            load_market_data.clear()
             st.rerun()
     st.subheader("📋 Faber A 신호 및 추천 비중")
     results = []
@@ -3216,9 +3308,11 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     }])], ignore_index=True)
     df_display = df_results.copy()
     # 금현물 표시명 변경
-    if rt_kodex_px:
+    if gold_source == "KODEX_REALTIME":
         gold_display_name = "금현물 (0064K0🔴실시간)"
-    elif rt_gold_krw:
+    elif gold_source == "KODEX_STICKY":
+        gold_display_name = "금현물 (0064K0🟡지연값)"
+    elif gold_source == "GC_FX_REALTIME":
         gold_display_name = "금현물 (GC=F×환율🔴실시간)"
     else:
         gold_display_name = "금현물 (0064K0 종가기준)"
