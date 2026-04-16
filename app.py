@@ -96,6 +96,110 @@ def _read_fdr_with_fallback(ticker, start_date, end_date):
     return None
 
 
+@st.cache_data(ttl=86400)
+def _fetch_fred_series_csv(series_id, start_date, end_date):
+    """FRED CSV 공개 엔드포인트로 시계열을 조회한다 (API 키 불필요)."""
+    try:
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        url = (
+            "https://fred.stlouisfed.org/graph/fredgraph.csv"
+            f"?id={series_id}&cosd={start_ts.date()}&coed={end_ts.date()}"
+        )
+        raw = pd.read_csv(url)
+        if raw is None or raw.empty or len(raw.columns) < 2:
+            return None
+        date_col = raw.columns[0]
+        value_col = raw.columns[1]
+        dt = pd.to_datetime(raw[date_col], errors="coerce")
+        vals = pd.to_numeric(raw[value_col], errors="coerce")
+        s = pd.Series(vals.values, index=dt).dropna()
+        s = s[(s.index >= start_ts) & (s.index <= end_ts)]
+        if s.empty:
+            return None
+        s = s[~s.index.duplicated(keep="last")].sort_index()
+        return s.astype(float)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=86400)
+def _fetch_fred_series(series_id, start_date, end_date):
+    """FRED 시계열 조회: API 키가 있으면 fredapi, 없거나 실패하면 CSV fallback."""
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+
+    # 1) fredapi (키가 있을 때)
+    try:
+        from fredapi import Fred
+
+        fred_key = None
+        try:
+            fred_key = st.secrets["FRED_API_KEY"]
+        except Exception:
+            fred_key = None
+
+        if fred_key:
+            fred = Fred(api_key=fred_key)
+            s = fred.get_series(series_id, observation_start=start_ts, observation_end=end_ts)
+            if s is not None and len(s) > 0:
+                s = pd.to_numeric(pd.Series(s), errors="coerce").dropna()
+                s = s[~s.index.duplicated(keep="last")].sort_index()
+                s = s[(s.index >= start_ts) & (s.index <= end_ts)]
+                if len(s) > 0:
+                    return s.astype(float)
+    except Exception:
+        pass
+
+    # 2) 공개 CSV fallback (키 불필요)
+    return _fetch_fred_series_csv(series_id, start_ts, end_ts)
+
+
+@st.cache_data(ttl=86400)
+def get_usdkrw_series(start_date, end_date):
+    """USD/KRW 환율 시계열.
+    - 우선: FRED DEXKOUS (긴 히스토리)
+    - 보강: FDR USD/KRW (최근 구간 품질 보강)
+    """
+    pieces = []
+    try:
+        fred_fx = _fetch_fred_series("DEXKOUS", start_date, end_date)
+        if fred_fx is not None and len(fred_fx) > 0:
+            pieces.append(fred_fx.rename("Close"))
+    except Exception:
+        pass
+
+    try:
+        fdr_fx = fdr.DataReader("USD/KRW", start_date, end_date)
+        if fdr_fx is not None and not fdr_fx.empty and "Close" in fdr_fx.columns:
+            fdr_close = (
+                fdr_fx["Close"]
+                .astype(float)
+                .rename("Close")
+                .sort_index()
+            )
+            fdr_close = fdr_close[~fdr_close.index.duplicated(keep="last")]
+            pieces.append(fdr_close)
+    except Exception:
+        pass
+
+    if not pieces:
+        return None
+
+    # 같은 날짜는 뒤에 붙은 소스(FDR)를 우선 사용.
+    merged = pd.concat(pieces).sort_index()
+    merged = merged[~merged.index.duplicated(keep="last")]
+    merged = merged[(merged.index >= pd.Timestamp(start_date)) & (merged.index <= pd.Timestamp(end_date))]
+    merged = merged.dropna()
+    if merged.empty:
+        return None
+
+    out = pd.DataFrame(index=merged.index)
+    out["Close"] = merged.values.astype(float)
+    out["Adj Close"] = out["Close"]
+    return out
+
+
 @st.cache_data(ttl=20)
 def get_realtime_kodex_gold_active():
     """KODEX 금액티브(0064K0) 실시간 시세 조회. 실패 시 None."""
@@ -343,7 +447,7 @@ def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
                 gld = gld[~gld.index.duplicated(keep='last')]
                 usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
                 merged = pd.concat([gld['Close'], usdkrw['Close']], axis=1, keys=['GLD', 'USDKRW'])
-                merged = merged.ffill().bfill()
+                merged = merged.ffill()
                 synthetic_df = pd.DataFrame(index=merged.index)
                 synthetic_df['Close'] = merged['GLD'] * merged['USDKRW']
                 synthetic_df['Adj Close'] = synthetic_df['Close']
@@ -419,7 +523,7 @@ def fetch_proxy_data(asset_name, start_date, end_date):
         
         elif config['type'] == 'us_etf_fx':
             us_df = fdr.DataReader(config['ticker'], start_date, end_date)
-            fx_df = fdr.DataReader(config['fx'], start_date, end_date)
+            fx_df = get_usdkrw_series(start_date, end_date) if config.get('fx') == 'USD/KRW' else fdr.DataReader(config['fx'], start_date, end_date)
             if us_df is None or us_df.empty or fx_df is None or fx_df.empty:
                 return None
             us_df = us_df[~us_df.index.duplicated(keep='last')]
@@ -427,7 +531,7 @@ def fetch_proxy_data(asset_name, start_date, end_date):
             us_close = us_df['Adj Close'] if 'Adj Close' in us_df.columns else us_df['Close']
             fx_close = fx_df['Close']
             merged = pd.concat([us_close, fx_close], axis=1, keys=['US', 'FX'])
-            merged = merged.ffill().bfill().dropna()
+            merged = merged.ffill().dropna()
             synthetic_df = pd.DataFrame(index=merged.index)
             synthetic_df['Close'] = merged['US'] * merged['FX']
             synthetic_df['Adj Close'] = synthetic_df['Close']
@@ -444,16 +548,19 @@ def fetch_deep_proxy_kospi(start_date, end_date):
     KODEX200(069500) 상장 전(2002-10-14) 구간 커버.
     """
     try:
-        df = fdr.DataReader('KS11', start_date, end_date)
-        if df is None or df.empty:
-            return None
-        df = df[~df.index.duplicated(keep='last')].sort_index()
-        if 'Close' not in df.columns:
-            return None
-        result = pd.DataFrame(index=df.index)
-        result['Close'] = df['Close'].astype(float)
-        result['Adj Close'] = result['Close']
-        return result
+        for symbol in ('KS11', '^KS11', 'KOSPI'):
+            try:
+                df = fdr.DataReader(symbol, start_date, end_date)
+                if df is None or df.empty or 'Close' not in df.columns:
+                    continue
+                df = df[~df.index.duplicated(keep='last')].sort_index()
+                result = pd.DataFrame(index=df.index)
+                result['Close'] = df['Close'].astype(float)
+                result['Adj Close'] = result['Close']
+                return result
+            except Exception:
+                continue
+        return None
     except Exception as e:
         st.warning(f"딥프록시(KOSPI) 로딩 오류: {e}")
         return None
@@ -467,21 +574,7 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
     ※ 과거 ECOS API 방식에서 FRED로 대체.
     """
     try:
-        from fredapi import Fred
-        try:
-            fred_key = st.secrets["FRED_API_KEY"]
-            fred = Fred(api_key=fred_key)
-        except Exception:
-            fred = None
-            st.warning("FRED API 키 없음 — 한국채30년 딥프록시 건너뜀.")
-            return None
-        start_ts = pd.Timestamp(start_date)
-        end_ts = pd.Timestamp(end_date)
-        yields_raw = fred.get_series(
-            'IRLTLT01KRM156N',
-            observation_start=start_ts,
-            observation_end=end_ts,
-        )
+        yields_raw = _fetch_fred_series('IRLTLT01KRM156N', start_date, end_date)
         if yields_raw is None or yields_raw.empty:
             st.warning("FRED IRLTLT01KRM156N 데이터를 가져올 수 없습니다 (한국채30년 딥프록시).")
             return None
@@ -516,17 +609,7 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
     TLT 상장 전(2002-07-30) 구간 커버.
     """
     try:
-        from fredapi import Fred
-        try:
-            fred_key = st.secrets["FRED_API_KEY"]
-            fred = Fred(api_key=fred_key)
-        except Exception:
-            fred = None
-            st.warning("FRED API 키 없음 — 미국채30년 딥프록시 건너뜀.")
-            return None
-        start_ts = pd.Timestamp(start_date)
-        end_ts = pd.Timestamp(end_date)
-        yields_raw = fred.get_series('GS30', observation_start=start_ts, observation_end=end_ts)
+        yields_raw = _fetch_fred_series('GS30', start_date, end_date)
         if yields_raw is None or yields_raw.empty:
             return None
         # 영업일 기준 리인덱싱 + ffill
@@ -539,7 +622,7 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
         daily_return = daily_return.fillna(0.0)
         price_usd = (1 + daily_return).cumprod() * 100
         # USD → KRW
-        usdkrw_df = fdr.DataReader('USD/KRW', start_date, end_date)
+        usdkrw_df = get_usdkrw_series(start_date, end_date)
         if usdkrw_df is None or usdkrw_df.empty:
             return None
         usdkrw = usdkrw_df['Close']
@@ -559,38 +642,48 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_gold_fred(start_date, end_date):
     """금 딥프록시 × USD/KRW → KRW 가격 (2000-01-01~).
-    소스 우선순위:
-      1순위: fdr.DataReader('GLD', ...)  — 2004-11-18~ (ETF 상장일)
-      2순위: fdr.DataReader('GC=F', ...) — 금 선물, 더 긴 히스토리
+    소스:
+      - GC=F(선물, 장기) + GLD(ETF, 최근) 체인링크 우선
+      - 한쪽만 있으면 단일 소스 사용
     fredapi 의존성 없음.
     """
     try:
-        usdkrw_df = fdr.DataReader('USD/KRW', start_date, end_date)
+        usdkrw_df = get_usdkrw_series(start_date, end_date)
         if usdkrw_df is None or usdkrw_df.empty:
             st.warning("USD/KRW 데이터를 가져올 수 없습니다 (금 딥프록시).")
             return None
         usdkrw = usdkrw_df['Close']
         usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
 
-        gold_usd = None
+        gld_df, gc_df = None, None
         for ticker in ('GLD', 'GC=F'):
             try:
-                df = fdr.DataReader(ticker, start_date, end_date)
-                if df is None or df.empty:
+                raw = fdr.DataReader(ticker, start_date, end_date)
+                if raw is None or raw.empty or 'Close' not in raw.columns:
                     continue
-                df = df[~df.index.duplicated(keep='last')].sort_index()
-                col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
-                s = df[col].dropna()
-                if len(s) > 0:
-                    gold_usd = s
-                    break
+                raw = raw[~raw.index.duplicated(keep='last')].sort_index()
+                out = pd.DataFrame(index=raw.index)
+                out['Close'] = raw['Close'].astype(float)
+                out['Adj Close'] = raw['Adj Close'].astype(float) if 'Adj Close' in raw.columns else out['Close']
+                if ticker == 'GLD':
+                    gld_df = out
+                else:
+                    gc_df = out
             except Exception:
                 continue
 
-        if gold_usd is None or gold_usd.empty:
+        if gc_df is not None and not gc_df.empty and gld_df is not None and not gld_df.empty:
+            # 장기(선물) 구간 + ETF 구간을 수익률 연속성 있게 연결.
+            gold_df = _chain_link_series(gc_df, gld_df)
+        elif gc_df is not None and not gc_df.empty:
+            gold_df = gc_df
+        elif gld_df is not None and not gld_df.empty:
+            gold_df = gld_df
+        else:
             st.warning("금 딥프록시 소스(GLD, GC=F) 모두 로딩 실패.")
             return None
 
+        gold_usd = gold_df['Adj Close'] if 'Adj Close' in gold_df.columns else gold_df['Close']
         merged = pd.concat([gold_usd, usdkrw], axis=1, keys=['gold', 'fx'])
         merged = merged.ffill().dropna()
         price_krw = merged['gold'] * merged['fx']
@@ -895,12 +988,12 @@ def _fetch_slot_proxy(slot_config, start_date, end_date):
             return r
         elif ptype == 'us_etf_fx':
             us = fdr.DataReader(ticker, start_date, end_date)
-            fx = fdr.DataReader(slot_config['fx'], start_date, end_date)
+            fx = get_usdkrw_series(start_date, end_date) if slot_config.get('fx') == 'USD/KRW' else fdr.DataReader(slot_config['fx'], start_date, end_date)
             if us is None or us.empty or fx is None or fx.empty: return None
             us = us[~us.index.duplicated(keep='last')]
             fx = fx[~fx.index.duplicated(keep='last')]
             uc = us['Adj Close'] if 'Adj Close' in us.columns else us['Close']
-            m = pd.concat([uc, fx['Close']], axis=1, keys=['US', 'FX']).ffill().bfill().dropna()
+            m = pd.concat([uc, fx['Close']], axis=1, keys=['US', 'FX']).ffill().dropna()
             r = pd.DataFrame(index=m.index)
             r['Close'] = m['US'] * m['FX']; r['Adj Close'] = r['Close']
             return r
@@ -1873,7 +1966,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.text(f"  {BENCHMARK_ETF['name']} ({BENCHMARK_ETF['ticker']}): ❌ 데이터 없음 (펀드코드가 FDR 미지원일 수 있음)")
 
     st.markdown("---")
-    st.subheader(f"📊 Faber A 전략 과거 성과 (Since {bt_start_date.strftime('%Y-%m')})")
+    st.subheader(f"📊 Faber A 전략 과거 성과 (요청 시작: {bt_start_date.strftime('%Y-%m')})")
     
     # 메인 전략: Faber A
     IC = 10_000_000
@@ -1882,6 +1975,17 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     if nav_df is None:
         st.error("백테스트 불가(데이터 부족). 시작일을 더 최근으로 조정해보세요.")
         return
+    actual_start = nav_df.index.min()
+    if actual_start > bt_start_date + timedelta(days=7):
+        st.error(
+            f"요청 시작일({bt_start_date.strftime('%Y-%m-%d')})과 실제 계산 시작일({actual_start.strftime('%Y-%m-%d')})이 다릅니다. "
+            "이 상태에서는 CAGR/MDD/연도별 성과를 신뢰하면 안 됩니다."
+        )
+        st.stop()
+    st.caption(
+        f"✅ 실제 계산 시작일: {actual_start.strftime('%Y-%m-%d')} "
+        f"(요청 시작일: {bt_start_date.strftime('%Y-%m-%d')})"
+    )
     
     # 기존 연속 모멘텀 (차트 비교 참고용)
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
@@ -1895,7 +1999,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     allw_nav = None
     try:
         allw_raw = fdr.DataReader('ALLW', bt_start_date, current_date)
-        allw_fx  = fdr.DataReader('USD/KRW', bt_start_date, current_date)
+        allw_fx  = get_usdkrw_series(bt_start_date, current_date)
         if allw_raw is not None and not allw_raw.empty and allw_fx is not None and not allw_fx.empty:
             allw_raw = allw_raw[~allw_raw.index.duplicated(keep='last')].sort_index()
             allw_fx  = allw_fx[~allw_fx.index.duplicated(keep='last')]
@@ -1921,7 +2025,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     st.markdown("#### 📊 Faber A 전략 성과")
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("백테스트 기간", f"{(current_date - bt_start_date).days}일")
+    c1.metric("백테스트 기간", f"{(nav_df.index[-1] - nav_df.index[0]).days}일")
     c2.metric("누적 수익률", f"{s_return*100:.2f}%")
     c3.metric("CAGR", f"{s_cagr*100:.2f}%")
     c4.metric("MDD (일별)", f"{s_mdd*100:.2f}%")
@@ -3344,7 +3448,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 c2g.metric("USD/KRW", f"₩{fx_price:,.0f}", help=f"기준일: {fx_date}")
                 c3g.metric("GLD×환율 (원화)", f"₩{gld_krw:,.0f}", help="GLD × USD/KRW")
                 gld_adj = gld_raw['Adj Close'] if 'Adj Close' in gld_raw.columns else gld_raw['Close']
-                gld_fx = pd.concat([gld_adj, fx_raw['Close']], axis=1, keys=['G', 'F']).ffill().bfill().dropna()
+                gld_fx = pd.concat([gld_adj, fx_raw['Close']], axis=1, keys=['G', 'F']).ffill().dropna()
                 gld_fx['KRW'] = gld_fx['G'] * gld_fx['F']
                 krw_series = gld_fx['KRW']
 
@@ -3423,6 +3527,18 @@ def mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_ca
     if nav_df is None or len(nav_df) < 2:
         st.error("백테스트 데이터 부족")
         return
+    actual_start = nav_df.index.min()
+    if actual_start > bt_start_date + timedelta(days=7):
+        st.error(
+            f"요청 시작일({bt_start_date.strftime('%Y-%m-%d')}) 대비 "
+            f"실제 계산 시작일({actual_start.strftime('%Y-%m-%d')})이 늦습니다. "
+            "이 상태에서는 몬테카를로 입력 분포 신뢰도가 낮습니다."
+        )
+        st.stop()
+    st.caption(
+        f"✅ 실제 계산 시작일: {actual_start.strftime('%Y-%m-%d')} "
+        f"(요청 시작일: {bt_start_date.strftime('%Y-%m-%d')})"
+    )
     
     # 실제 월별 수익률 추출
     monthly_nav = nav_df['nav'].resample('ME').last().dropna()
