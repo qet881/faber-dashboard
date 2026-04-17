@@ -2896,54 +2896,93 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     mode='A', buffer_df=None, price_col=price_col)
 
                 if orig_nav is not None and alt_nav is not None:
-                    # 비교 테이블
-                    bond_comp = build_comparison_table({
-                        '기존 (미국채30년=TLT)': orig_nav,
-                        '교체 (미국채30년→SCHD)': alt_nav,
-                    }, IC)
-                    if bond_comp is not None:
-                        st.dataframe(bond_comp, use_container_width=True)
+                    # 공정 비교 시작일: SCHD 실데이터 시작일 이후만 허용
+                    schd_start = schd_proxy.index.min() if schd_proxy is not None and not schd_proxy.empty else None
+                    if schd_start is None:
+                        st.warning("SCHD 시작일을 확인할 수 없어 공정 비교를 수행할 수 없습니다.")
+                        raise ValueError("SCHD start date missing")
+                    fair_start = max(pd.Timestamp(bt_start_date), pd.Timestamp(schd_start))
+                    orig_nav_cut = orig_nav[orig_nav.index >= fair_start].copy()
+                    alt_nav_cut = alt_nav[alt_nav.index >= fair_start].copy()
 
-                    # 성과 요약
-                    ov_, or_, om_, oc_ = calculate_performance_metrics(orig_nav, IC)
-                    av_, ar_, am_, ac_ = calculate_performance_metrics(alt_nav, IC)
-                    bc1, bc2, bc3, bc4 = st.columns(4)
-                    bc1.metric("기존 CAGR", f"{oc_*100:.2f}%" if oc_ is not None else "-")
-                    bc2.metric("교체 CAGR", f"{ac_*100:.2f}%" if ac_ is not None else "-",
-                               delta=f"{(ac_-oc_)*100:+.2f}%p" if (ac_ is not None and oc_ is not None) else None)
-                    bc3.metric("기존 MDD", f"{om_*100:.2f}%" if om_ is not None else "-")
-                    bc4.metric("교체 MDD", f"{am_*100:.2f}%" if am_ is not None else "-",
-                               delta=f"{(am_-om_)*100:+.2f}%p" if (am_ is not None and om_ is not None) else None)
+                    # 공정 비교: 반드시 공통 거래일 교집합으로 정렬
+                    fair_map = {
+                        '기존 (미국채30년=TLT)': orig_nav_cut,
+                        '교체 (미국채30년→SCHD)': alt_nav_cut,
+                    }
+                    fair_aligned, fair_meta, fair_status = align_strategies_to_common_dates(
+                        fair_map, min_obs_days=252
+                    )
+                    orig_fair = fair_aligned.get('기존 (미국채30년=TLT)')
+                    alt_fair = fair_aligned.get('교체 (미국채30년→SCHD)')
 
-                    # 비교 차트
-                    fig_bc = make_subplots(rows=2, cols=1, subplot_titles=("수익률 (%)", "Drawdown (%)"),
-                        vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
-                    or_pct = ((orig_nav['nav'] / IC) - 1) * 100
-                    ar_pct = ((alt_nav['nav'] / IC) - 1) * 100
-                    fig_bc.add_trace(go.Scatter(x=orig_nav.index, y=or_pct, mode='lines',
-                        name='기존 (미국채30년)', line=dict(color='#1f77b4', width=2),
-                        hovertemplate="%{x|%Y-%m-%d}<br>기존: %{y:.1f}%<extra></extra>"), row=1, col=1)
-                    fig_bc.add_trace(go.Scatter(x=alt_nav.index, y=ar_pct, mode='lines',
-                        name='교체 (SCHD)', line=dict(color='#ff7f0e', width=2, dash='dash'),
-                        hovertemplate="%{x|%Y-%m-%d}<br>SCHD: %{y:.1f}%<extra></extra>"), row=1, col=1)
-                    fig_bc.add_trace(go.Scatter(x=orig_nav.index, y=orig_nav['drawdown']*100,
-                        mode='lines', name='DD 기존', fill='tozeroy',
-                        line=dict(color='#1f77b4', width=1),
-                        hovertemplate="%{x|%Y-%m-%d}<br>기존 DD: %{y:.1f}%<extra></extra>"), row=2, col=1)
-                    fig_bc.add_trace(go.Scatter(x=alt_nav.index, y=alt_nav['drawdown']*100,
-                        mode='lines', name='DD SCHD',
-                        line=dict(color='#ff7f0e', width=1.5, dash='dash'),
-                        hovertemplate="%{x|%Y-%m-%d}<br>SCHD DD: %{y:.1f}%<extra></extra>"), row=2, col=1)
-                    fig_bc.update_yaxes(title_text="수익률 (%)", row=1, col=1)
-                    fig_bc.update_yaxes(title_text="낙폭 (%)", row=2, col=1)
-                    fig_bc.update_layout(title="채권 슬롯 교체: 미국채30년(TLT) vs 미국배당다우존스(SCHD)",
-                        height=650, hovermode='x unified',
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_bc, use_container_width=True)
+                    if (
+                        fair_meta["common_obs"] == 0
+                        or orig_fair is None or orig_fair.empty
+                        or alt_fair is None or alt_fair.empty
+                    ):
+                        st.warning("공정 비교를 위한 공통 거래일이 부족하여 SCHD 슬롯 비교를 표시할 수 없습니다.")
+                    else:
+                        st.caption("✅ 본 섹션은 **동일·공평한 기간**으로 비교합니다. SCHD 실데이터 시작일 이후, 두 전략의 공통 거래일 교집합만 사용했습니다.")
+                        st.caption(
+                            f"📅 공정 비교 기간: {fair_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+                            f"{fair_meta['common_end'].strftime('%Y-%m-%d')} "
+                            f"({fair_meta['common_obs']}거래일)"
+                        )
 
-                    st.caption("💡 SCHD는 미국 배당 우량주 ETF. 채권과 성격이 완전히 다름 — "
-                               "금리 인상기(2022)에 채권은 급락했지만 SCHD는 상대적 방어. "
-                               "반면 주식 하락장에서는 채권의 헤지 역할을 못함.")
+                        # 비교 테이블
+                        bond_comp = build_comparison_table({
+                            '기존 (미국채30년=TLT)': orig_fair,
+                            '교체 (미국채30년→SCHD)': alt_fair,
+                        }, IC)
+                        if bond_comp is not None:
+                            st.dataframe(bond_comp, use_container_width=True)
+
+                        fair_warn = fair_status[fair_status["상태"] != "비교 가능"]
+                        if not fair_warn.empty:
+                            st.caption("⚠️ 공정 비교 주의/제외 전략")
+                            st.dataframe(fair_warn, use_container_width=True, hide_index=True)
+
+                        # 성과 요약
+                        ov_, or_, om_, oc_ = calculate_performance_metrics(orig_fair, IC)
+                        av_, ar_, am_, ac_ = calculate_performance_metrics(alt_fair, IC)
+                        bc1, bc2, bc3, bc4 = st.columns(4)
+                        bc1.metric("기존 CAGR", f"{oc_*100:.2f}%" if oc_ is not None else "-")
+                        bc2.metric("교체 CAGR", f"{ac_*100:.2f}%" if ac_ is not None else "-",
+                                   delta=f"{(ac_-oc_)*100:+.2f}%p" if (ac_ is not None and oc_ is not None) else None)
+                        bc3.metric("기존 MDD", f"{om_*100:.2f}%" if om_ is not None else "-")
+                        bc4.metric("교체 MDD", f"{am_*100:.2f}%" if am_ is not None else "-",
+                                   delta=f"{(am_-om_)*100:+.2f}%p" if (am_ is not None and om_ is not None) else None)
+
+                        # 비교 차트
+                        fig_bc = make_subplots(rows=2, cols=1, subplot_titles=("수익률 (%)", "Drawdown (%)"),
+                            vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
+                        or_pct = ((orig_fair['nav'] / IC) - 1) * 100
+                        ar_pct = ((alt_fair['nav'] / IC) - 1) * 100
+                        fig_bc.add_trace(go.Scatter(x=orig_fair.index, y=or_pct, mode='lines',
+                            name='기존 (미국채30년)', line=dict(color='#1f77b4', width=2),
+                            hovertemplate="%{x|%Y-%m-%d}<br>기존: %{y:.1f}%<extra></extra>"), row=1, col=1)
+                        fig_bc.add_trace(go.Scatter(x=alt_fair.index, y=ar_pct, mode='lines',
+                            name='교체 (SCHD)', line=dict(color='#ff7f0e', width=2, dash='dash'),
+                            hovertemplate="%{x|%Y-%m-%d}<br>SCHD: %{y:.1f}%<extra></extra>"), row=1, col=1)
+                        fig_bc.add_trace(go.Scatter(x=orig_fair.index, y=orig_fair['drawdown']*100,
+                            mode='lines', name='DD 기존', fill='tozeroy',
+                            line=dict(color='#1f77b4', width=1),
+                            hovertemplate="%{x|%Y-%m-%d}<br>기존 DD: %{y:.1f}%<extra></extra>"), row=2, col=1)
+                        fig_bc.add_trace(go.Scatter(x=alt_fair.index, y=alt_fair['drawdown']*100,
+                            mode='lines', name='DD SCHD',
+                            line=dict(color='#ff7f0e', width=1.5, dash='dash'),
+                            hovertemplate="%{x|%Y-%m-%d}<br>SCHD DD: %{y:.1f}%<extra></extra>"), row=2, col=1)
+                        fig_bc.update_yaxes(title_text="수익률 (%)", row=1, col=1)
+                        fig_bc.update_yaxes(title_text="낙폭 (%)", row=2, col=1)
+                        fig_bc.update_layout(title="채권 슬롯 교체: 미국채30년(TLT) vs 미국배당다우존스(SCHD)",
+                            height=650, hovermode='x unified',
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                        st.plotly_chart(fig_bc, use_container_width=True)
+
+                        st.caption("💡 SCHD는 미국 배당 우량주 ETF. 채권과 성격이 완전히 다름 — "
+                                   "금리 인상기(2022)에 채권은 급락했지만 SCHD는 상대적 방어. "
+                                   "반면 주식 하락장에서는 채권의 헤지 역할을 못함.")
                 else:
                     st.warning("시뮬레이션 실패 (데이터 부족).")
             else:
