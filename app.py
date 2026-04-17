@@ -2318,6 +2318,87 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.dataframe(quant_warn_df, use_container_width=True, hide_index=True)
 
     # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
+        # ?? Faber A/B/C/D Overlay Comparison (non-invasive) ?????????????????????
+    st.markdown("---")
+    st.subheader("??? Faber Defensive Overlay: A vs B/C/D")
+    st.caption(
+        "?? Faber A ??? ??? ????, ?? ???? B/C/D? ??? ??? ?? ???? ?????."
+    )
+    st.caption(
+        "A: OFF->Cash | B: OFF->IEF(always) | C: OFF->IEF(IEF gate) | D: OFF->SHV(SHV gate)"
+    )
+
+    ief_buffer_df = _fetch_slot_proxy(
+        {'proxy': 'IEF', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
+        data_start, current_date
+    )
+    shv_buffer_df = _fetch_slot_proxy(
+        {'proxy': 'SHV', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
+        data_start, current_date
+    )
+
+    mode_b_nav = mode_c_nav = mode_d_nav = None
+    if ief_buffer_df is not None and not ief_buffer_df.empty:
+        mode_b_nav = simulate_faber_strategy(
+            bt_start_date, current_date, IC, all_data,
+            mode='B', buffer_df=ief_buffer_df, price_col=price_col
+        )
+        mode_c_nav = simulate_faber_strategy(
+            bt_start_date, current_date, IC, all_data,
+            mode='C', buffer_df=ief_buffer_df, price_col=price_col
+        )
+    if shv_buffer_df is not None and not shv_buffer_df.empty:
+        mode_d_nav = simulate_faber_strategy(
+            bt_start_date, current_date, IC, all_data,
+            mode='D', buffer_df=shv_buffer_df, price_col=price_col
+        )
+
+    overlay_map = {"A Base (OFF->Cash)": nav_df}
+    if mode_b_nav is not None:
+        overlay_map["B OFF->IEF (always)"] = mode_b_nav
+    if mode_c_nav is not None:
+        overlay_map["C OFF->IEF (IEF gate)"] = mode_c_nav
+    if mode_d_nav is not None:
+        overlay_map["D OFF->SHV (SHV gate)"] = mode_d_nav
+
+    if len(overlay_map) >= 2:
+        ov_aligned, ov_meta, ov_status = align_strategies_to_common_dates(
+            overlay_map, min_obs_days=252
+        )
+        if ov_meta["common_obs"] > 0:
+            st.caption(
+                f"?? Common period: {ov_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+                f"{ov_meta['common_end'].strftime('%Y-%m-%d')} ({ov_meta['common_obs']} trading days)"
+            )
+
+            ov_cmp = build_comparison_table(ov_aligned, IC)
+            if ov_cmp is not None:
+                st.dataframe(ov_cmp, use_container_width=True)
+
+            ov_extra_rows = []
+            for name, nav_cut in ov_aligned.items():
+                m = _strategy_metrics(nav_cut, IC)
+                if m is None:
+                    continue
+                ov_extra_rows.append({
+                    "Strategy": name,
+                    "Ulcer": _fmt(m["ulcer"], "{:.2f}"),
+                    "Martin": _fmt(m["martin"], "{:.2f}"),
+                    "CVaR 5% (M)": _fmt(m["cvar_5"], "{:.2%}"),
+                    "Positive Month %": _fmt(m["pos_month"], "{:.1%}"),
+                })
+            if ov_extra_rows:
+                st.caption("Additional risk metrics (same common period)")
+                st.dataframe(pd.DataFrame(ov_extra_rows), use_container_width=True, hide_index=True)
+
+            if ov_status is not None and not ov_status.empty:
+                st.caption("Overlay status (common-period eligibility)")
+                st.dataframe(ov_status, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Overlay comparison is unavailable because there are no common dates.")
+    else:
+        st.warning("Overlay comparison is unavailable because IEF/SHV buffer data could not be loaded.")
+
     st.markdown("---")
     st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
     st.caption("현금 없이 5자산 각 20%를 고정 후 월말 리밸런싱. Faber A의 타이밍 능력이 단순 분산 대비 얼마나 유효한지 확인합니다.")
