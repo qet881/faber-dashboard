@@ -1723,6 +1723,91 @@ def build_comparison_table(strategies_dict, initial_capital):
     return df
 
 
+def _normalize_nav_for_compare(nav_df):
+    """공정 비교를 위해 nav 시계열을 정리하고 drawdown을 재계산한다."""
+    if nav_df is None or nav_df.empty or "nav" not in nav_df.columns:
+        return None
+    out = nav_df[["nav"]].copy()
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    if out.empty:
+        return None
+    out["running_max"] = out["nav"].expanding().max()
+    out["drawdown"] = (out["nav"] - out["running_max"]) / out["running_max"]
+    return out
+
+
+def align_strategies_to_common_dates(strategies_dict, min_obs_days=252):
+    """전략 NAV를 공통 거래일 교집합으로 맞춰 공정 비교용 데이터와 상태를 반환."""
+    normalized = {}
+    raw_meta = {}
+    for name, nav_df in strategies_dict.items():
+        ndf = _normalize_nav_for_compare(nav_df)
+        if ndf is None:
+            raw_meta[name] = None
+            continue
+        normalized[name] = ndf
+        raw_meta[name] = {
+            "start": ndf.index.min(),
+            "end": ndf.index.max(),
+            "obs": len(ndf),
+        }
+
+    common_idx = None
+    if normalized:
+        for ndf in normalized.values():
+            common_idx = ndf.index if common_idx is None else common_idx.intersection(ndf.index)
+        common_idx = common_idx.sort_values()
+
+    aligned = {}
+    common_start, common_end, common_obs = None, None, 0
+    if common_idx is not None and len(common_idx) > 0:
+        common_start = common_idx[0]
+        common_end = common_idx[-1]
+        common_obs = len(common_idx)
+        for name, ndf in normalized.items():
+            cut = ndf.loc[common_idx].copy()
+            cut["running_max"] = cut["nav"].expanding().max()
+            cut["drawdown"] = (cut["nav"] - cut["running_max"]) / cut["running_max"]
+            aligned[name] = cut
+
+    status_rows = []
+    for name in strategies_dict.keys():
+        meta = raw_meta.get(name)
+        if meta is None:
+            status_rows.append({
+                "전략": name,
+                "원본 기간": "-",
+                "원본 거래일": 0,
+                "공통 거래일": 0,
+                "상태": "제외 (데이터 없음)",
+            })
+            continue
+
+        aligned_obs = len(aligned.get(name, []))
+        if common_obs == 0:
+            state = "제외 (공통 거래일 없음)"
+        elif aligned_obs < min_obs_days:
+            state = f"주의 (공통 거래일 부족: {aligned_obs}일)"
+        else:
+            state = "비교 가능"
+
+        status_rows.append({
+            "전략": name,
+            "원본 기간": f"{meta['start'].strftime('%Y-%m-%d')} ~ {meta['end'].strftime('%Y-%m-%d')}",
+            "원본 거래일": int(meta["obs"]),
+            "공통 거래일": int(aligned_obs),
+            "상태": state,
+        })
+
+    meta = {
+        "common_start": common_start,
+        "common_end": common_end,
+        "common_obs": int(common_obs),
+        "min_obs_days": int(min_obs_days),
+    }
+    return aligned, meta, pd.DataFrame(status_rows)
+
+
 # ==============================
 # 8. 차트
 # ==============================
@@ -2049,6 +2134,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
+    st.caption("✅ 기준 확인: Faber A/이전 전략/정적 균등 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다.")
 
     def _strategy_metrics(nav, ic):
         """nav DataFrame에서 CAGR/MDD/Sharpe/Sortino를 딕셔너리로 반환."""
@@ -2064,24 +2150,42 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     def _fmt(v, fmt):
         return fmt.format(v) if v is not None else "-"
 
-    m_faber = _strategy_metrics(nav_df, IC)
-    m_old   = _strategy_metrics(old_nav, IC) if old_nav is not None else None
+    quant_strategies = {
+        "Faber A ⭐": nav_df,
+        "이전 전략(연속 모멘텀)": old_nav,
+    }
+    quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
+        quant_strategies, min_obs_days=252
+    )
+    if quant_meta["common_obs"] > 0:
+        st.caption(
+            f"📅 공통 비교 기간: {quant_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+            f"{quant_meta['common_end'].strftime('%Y-%m-%d')} "
+            f"({quant_meta['common_obs']}거래일)"
+        )
+    else:
+        st.warning("⚠️ Faber A와 이전 전략의 공통 거래일이 없어 공정 비교가 불가합니다.")
 
-    comparison_rows = [
-        ("CAGR",        _fmt(m_faber["cagr"]    if m_faber else None, "{:.2%}"),
-                        _fmt(m_old["cagr"]       if m_old   else None, "{:.2%}")),
-        ("MDD (일별)",  _fmt(m_faber["mdd"]      if m_faber else None, "{:.2%}"),
-                        _fmt(m_old["mdd"]        if m_old   else None, "{:.2%}")),
-        ("Sharpe",      _fmt(m_faber["sharpe"]   if m_faber else None, "{:.2f}"),
-                        _fmt(m_old["sharpe"]     if m_old   else None, "{:.2f}")),
-        ("Sortino",     _fmt(m_faber["sortino"]  if m_faber else None, "{:.2f}"),
-                        _fmt(m_old["sortino"]    if m_old   else None, "{:.2f}")),
-        ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"] if m_faber else None, "{:.2f}"),
-                        _fmt(m_old["cagr_mdd"]   if m_old   else None, "{:.2f}")),
-    ]
+    m_faber = _strategy_metrics(quant_aligned.get("Faber A ⭐"), IC)
+    m_old = _strategy_metrics(quant_aligned.get("이전 전략(연속 모멘텀)"), IC)
 
-    df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
-    st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+    if m_faber is not None and m_old is not None:
+        comparison_rows = [
+            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}")),
+            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}")),
+            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}")),
+            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}")),
+            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}")),
+        ]
+        df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
+        st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+    else:
+        st.warning("⚠️ 전략 정량 비교를 위한 공통 기간 데이터가 부족합니다.")
+
+    quant_warn_df = quant_status_df[quant_status_df["상태"] != "비교 가능"]
+    if not quant_warn_df.empty:
+        st.caption("⚠️ 공정 비교 주의/제외 전략")
+        st.dataframe(quant_warn_df, use_container_width=True, hide_index=True)
 
     # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
     st.markdown("---")
@@ -2091,12 +2195,35 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     eq_nav = simulate_equal_weight_no_cash(
         bt_start_date, current_date, IC, all_data, price_col=price_col)
 
-    if eq_nav is not None and nav_df is not None:
-        static_cmp = build_comparison_table({
-            'Faber A (5자산 타이밍) ⭐': nav_df,
-            '정적 균등 (20%×5, 현금無)': eq_nav,
-            '동일비중 B&H (현금포함)': static_nav,
-        }, IC)
+    static_compare_map = {
+        'Faber A (5자산 타이밍) ⭐': nav_df,
+        '정적 균등 (20%×5, 현금無)': eq_nav,
+        '동일비중 B&H (현금포함)': static_nav,
+    }
+    static_aligned, static_meta, static_status_df = align_strategies_to_common_dates(
+        static_compare_map, min_obs_days=252
+    )
+    if static_meta["common_obs"] > 0:
+        st.caption(
+            f"📅 공통 비교 기간: {static_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+            f"{static_meta['common_end'].strftime('%Y-%m-%d')} "
+            f"({static_meta['common_obs']}거래일)"
+        )
+    else:
+        st.warning("⚠️ Faber A와 정적 전략 간 공통 거래일이 없어 공정 비교가 불가합니다.")
+
+    faber_static = static_aligned.get('Faber A (5자산 타이밍) ⭐')
+    eq_static = static_aligned.get('정적 균등 (20%×5, 현금無)')
+    bh_static = static_aligned.get('동일비중 B&H (현금포함)')
+
+    if faber_static is not None and eq_static is not None:
+        cmp_input = {
+            'Faber A (5자산 타이밍) ⭐': faber_static,
+            '정적 균등 (20%×5, 현금無)': eq_static,
+        }
+        if bh_static is not None:
+            cmp_input['동일비중 B&H (현금포함)'] = bh_static
+        static_cmp = build_comparison_table(cmp_input, IC)
         if static_cmp is not None:
             st.dataframe(static_cmp, use_container_width=True)
 
@@ -2104,23 +2231,23 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         fig_static = make_subplots(rows=2, cols=1,
             subplot_titles=("수익률 (%)", "Drawdown (%)"),
             vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
-        faber_pct = ((nav_df['nav'] / IC) - 1) * 100
-        eq_pct    = ((eq_nav['nav']  / IC) - 1) * 100
-        fig_static.add_trace(go.Scatter(x=nav_df.index, y=faber_pct, mode='lines',
+        faber_pct = ((faber_static['nav'] / IC) - 1) * 100
+        eq_pct = ((eq_static['nav'] / IC) - 1) * 100
+        fig_static.add_trace(go.Scatter(x=faber_static.index, y=faber_pct, mode='lines',
             name='Faber A ⭐', line=dict(color='#1f77b4', width=2),
             hovertemplate="%{x|%Y-%m-%d}<br>Faber A: %{y:.1f}%<extra></extra>"), row=1, col=1)
-        fig_static.add_trace(go.Scatter(x=eq_nav.index, y=eq_pct, mode='lines',
+        fig_static.add_trace(go.Scatter(x=eq_static.index, y=eq_pct, mode='lines',
             name='정적 균등 20%×5', line=dict(color='#d62728', width=2, dash='dash'),
             hovertemplate="%{x|%Y-%m-%d}<br>정적: %{y:.1f}%<extra></extra>"), row=1, col=1)
-        if static_nav is not None:
-            st_pct = ((static_nav['nav'] / IC) - 1) * 100
-            fig_static.add_trace(go.Scatter(x=static_nav.index, y=st_pct, mode='lines',
+        if bh_static is not None:
+            st_pct = ((bh_static['nav'] / IC) - 1) * 100
+            fig_static.add_trace(go.Scatter(x=bh_static.index, y=st_pct, mode='lines',
                 name='동일비중+현금', line=dict(color='gray', width=1, dash='dot'),
                 hovertemplate="%{x|%Y-%m-%d}<br>B&H: %{y:.1f}%<extra></extra>"), row=1, col=1)
-        fig_static.add_trace(go.Scatter(x=nav_df.index, y=nav_df['drawdown']*100,
+        fig_static.add_trace(go.Scatter(x=faber_static.index, y=faber_static['drawdown']*100,
             mode='lines', name='DD Faber A', fill='tozeroy',
             line=dict(color='#1f77b4', width=1)), row=2, col=1)
-        fig_static.add_trace(go.Scatter(x=eq_nav.index, y=eq_nav['drawdown']*100,
+        fig_static.add_trace(go.Scatter(x=eq_static.index, y=eq_static['drawdown']*100,
             mode='lines', name='DD 정적',
             line=dict(color='#d62728', width=1.5, dash='dash')), row=2, col=1)
         fig_static.update_yaxes(title_text="수익률 (%)", row=1, col=1)
@@ -2132,6 +2259,11 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.plotly_chart(fig_static, use_container_width=True)
         st.caption("💡 **정적 균등**: 시장 상황에 관계없이 5자산 20%씩 유지. "
                    "Faber A보다 MDD가 크지만 CAGR도 높을 수 있음 — 타이밍 비용 vs 하락 방어 트레이드오프.")
+
+        static_warn_df = static_status_df[static_status_df["상태"] != "비교 가능"]
+        if not static_warn_df.empty:
+            st.caption("⚠️ 공정 비교 주의/제외 전략")
+            st.dataframe(static_warn_df, use_container_width=True, hide_index=True)
 
         # ── 회복력 분석 ─────────────────────────────────────
         st.markdown("#### 📉 회복력 분석")
@@ -2176,14 +2308,36 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 '최장 회복기간': fmt(max(periods)) if periods else "-",
             }
 
+        recovery_map = {
+            'Faber A ⭐': nav_df,
+            '정적 균등 (20%×5)': eq_nav,
+            '이전 전략(연속 모멘텀)': old_nav,
+        }
+        rec_aligned, rec_meta, rec_status_df = align_strategies_to_common_dates(
+            recovery_map, min_obs_days=252
+        )
+        if rec_meta["common_obs"] > 0:
+            st.caption(
+                f"📅 공통 비교 기간: {rec_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+                f"{rec_meta['common_end'].strftime('%Y-%m-%d')} "
+                f"({rec_meta['common_obs']}거래일)"
+            )
+
         rec_rows = []
-        for lbl, ns in [('Faber A ⭐', nav_df['nav'] if nav_df is not None else None),
-                        ('정적 균등 (20%×5)', eq_nav['nav'] if eq_nav is not None else None)]:
-            r = _calc_recovery(ns)
+        for lbl in ['Faber A ⭐', '정적 균등 (20%×5)', '이전 전략(연속 모멘텀)']:
+            nav_aligned = rec_aligned.get(lbl)
+            r = _calc_recovery(nav_aligned["nav"]) if nav_aligned is not None else None
             if r: rec_rows.append({'전략': lbl, **r})
         if rec_rows:
             st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
             st.caption("💡 **Underwater 비율**: 전체 기간 중 고점 아래 있던 비중. **최장 회복기간**: 한 번 꺾인 후 회복까지 최대 시간.")
+
+        rec_warn_df = rec_status_df[rec_status_df["상태"] != "비교 가능"]
+        if not rec_warn_df.empty:
+            st.caption("⚠️ 회복력 분석 주의/제외 전략")
+            st.dataframe(rec_warn_df, use_container_width=True, hide_index=True)
+    else:
+        st.warning("정적 균등 전략 데이터가 부족해 공정 비교를 수행할 수 없습니다.")
 
     # Faber A 월별 비중 변화
     st.markdown("---")
