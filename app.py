@@ -640,72 +640,6 @@ def fetch_deep_proxy_us_bond_fred(start_date, end_date):
 
 
 @st.cache_data(ttl=86400)
-def fetch_deep_proxy_ief_fred(start_date, end_date):
-    """FRED GS10 -> IEF ????(KRW) ???? (2000-01-01~)."""
-    try:
-        yields_raw = _fetch_fred_series('GS10', start_date, end_date)
-        if yields_raw is None or yields_raw.empty:
-            return None
-
-        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
-        yields = yields_raw.reindex(all_dates).ffill().dropna()
-        daily_yield_change = yields.diff() / 100
-        duration_ief = 7.0
-        daily_return = -duration_ief / (1 + yields.shift(1) / 100) * daily_yield_change
-        daily_return = daily_return.fillna(0.0)
-        price_usd = (1 + daily_return).cumprod() * 100
-
-        usdkrw_df = get_usdkrw_series(start_date, end_date)
-        if usdkrw_df is None or usdkrw_df.empty:
-            return None
-        usdkrw = usdkrw_df['Close']
-        usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
-
-        merged = pd.concat([price_usd, usdkrw], axis=1, keys=['price', 'fx']).ffill().dropna()
-        price_krw = merged['price'] * merged['fx']
-        result = pd.DataFrame(index=price_krw.index)
-        result['Close'] = price_krw.values
-        result['Adj Close'] = result['Close']
-        return result
-    except Exception as e:
-        st.warning(f"????(IEF FRED) ?? ??: {e}")
-        return None
-
-
-@st.cache_data(ttl=86400)
-def fetch_deep_proxy_shv_fred(start_date, end_date):
-    """FRED 3M T-bill ??? -> SHV ?? ????(KRW) ???? (2000-01-01~)."""
-    try:
-        yields_raw = _fetch_fred_series('DGS3MO', start_date, end_date)
-        if yields_raw is None or yields_raw.empty:
-            yields_raw = _fetch_fred_series('TB3MS', start_date, end_date)
-        if yields_raw is None or yields_raw.empty:
-            return None
-
-        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
-        yields = yields_raw.reindex(all_dates).ffill().dropna()
-        daily_carry = (yields.shift(1) / 100.0) / 252.0
-        daily_carry = daily_carry.fillna(0.0)
-        price_usd = (1 + daily_carry).cumprod() * 100
-
-        usdkrw_df = get_usdkrw_series(start_date, end_date)
-        if usdkrw_df is None or usdkrw_df.empty:
-            return None
-        usdkrw = usdkrw_df['Close']
-        usdkrw = usdkrw[~usdkrw.index.duplicated(keep='last')]
-
-        merged = pd.concat([price_usd, usdkrw], axis=1, keys=['price', 'fx']).ffill().dropna()
-        price_krw = merged['price'] * merged['fx']
-        result = pd.DataFrame(index=price_krw.index)
-        result['Close'] = price_krw.values
-        result['Adj Close'] = result['Close']
-        return result
-    except Exception as e:
-        st.warning(f"????(SHV FRED) ?? ??: {e}")
-        return None
-
-
-@st.cache_data(ttl=86400)
 def fetch_deep_proxy_gold_fred(start_date, end_date):
     """금 딥프록시 × USD/KRW → KRW 가격 (2000-01-01~).
     소스:
@@ -1069,25 +1003,6 @@ def _fetch_slot_proxy(slot_config, start_date, end_date):
         return None
 
 
-@st.cache_data(ttl=3600)
-def load_faber_buffer_data(buffer_symbol, start_date, end_date):
-    """???? ??(IEF/SHV)? 2000??? ????+???? ????? ??."""
-    cfg = {'proxy': buffer_symbol, 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'}
-    etf_proxy = _fetch_slot_proxy(cfg, start_date, end_date)
-
-    deep_proxy = None
-    if buffer_symbol == 'IEF':
-        deep_proxy = fetch_deep_proxy_ief_fred(start_date, end_date)
-    elif buffer_symbol == 'SHV':
-        deep_proxy = fetch_deep_proxy_shv_fred(start_date, end_date)
-
-    if deep_proxy is None or deep_proxy.empty:
-        return etf_proxy
-    if etf_proxy is None or etf_proxy.empty:
-        return deep_proxy
-    return _chain_link_series(deep_proxy, etf_proxy)
-
-
 def build_slot_strategy_data(base_all_data, kr_slot_name, us_slot_name, start_date, end_date):
     """기존 all_data에서 한국주식/미국주식 슬롯만 교체한 데이터 생성.
 
@@ -1249,35 +1164,46 @@ def simulate_gtaa_strategy(start_date, end_date, initial_capital, all_data, pric
     return df
 
 def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, price_col="Adj Close"):
-    """Faber 12-Month High Switch ?? ??.
-    mode A: ?????20%, ??????
-    mode B: ?????20%, ????IEF??? (???)
-    mode C: ?????20%, ????IEF??? (IEF? ????, ??? ??)
-    mode D: ?????20%, ????SHV??? (SHV? ????, ??? ??)
-    mode E: ?????20%, ????IEF??? (IEF? -5% ? AND 12M ???>0 ? ??, ??? ??)
+    """Faber 12-Month High Switch 비중 계산.
+    mode A: 고점근처→20%, 나머지→현금
+    mode B: 고점근처→20%, 나머지→IEF×환율 (무조건)
+    mode C: 고점근처→20%, 나머지→IEF×환율 (IEF도 고점체크, 아니면 현금)
+    mode D: 고점근처→20%, 나머지→SHV×환율 (SHV도 고점체크, 아니면 현금)
+    mode E: 고점근처 AND 모멘텀>0 → 20%*모멘텀, 나머지→현금 (하이브리드)
     """
     weights = {}
     BUFFER_KEY = '_faber_buffer_'
-
+    
     for asset_name, ticker in ASSETS.items():
-        # ???? GLD???(??? ???)? Faber ?? ?? (ETF ??? ??)
-        # ???: ?? ???(?? ETF)? ??
+        # 금현물: GLD×환율(모멘텀 데이터)로 Faber 신호 판단 (ETF 괴리율 배제)
+        # 나머지: 가격 데이터(실제 ETF)로 판단
         if ticker == '411060':
-            signal_data = all_data.get(f"{asset_name}_???")
+            signal_data = all_data.get(f"{asset_name}_모멘텀")
         else:
             signal_data = all_data.get(asset_name)
         near_high = is_near_12month_high(signal_data, as_of_date, threshold=0.05, price_col=price_col)
-        weights[asset_name] = 0.20 if near_high else 0.0
-
+        
+        if mode == 'E':
+            # 하이브리드: 고점 근처일 때만 모멘텀 비중 적용
+            mom_data = all_data.get(f"{asset_name}_모멘텀")
+            _, score = calculate_momentum_score_at_date(ticker, as_of_date, mom_data, price_col=price_col)
+            if near_high and score is not None and score > 0:
+                weights[asset_name] = 0.20 * score
+            else:
+                weights[asset_name] = 0.0
+        else:
+            # 이진: 고점 근처면 20%, 아니면 0%
+            weights[asset_name] = 0.20 if near_high else 0.0
+    
     remainder = max(0.0, 1.0 - sum(weights.values()))
-
-    if mode == 'A':
+    
+    if mode == 'A' or mode == 'E':
         weights[CASH_NAME] = remainder
     elif mode == 'B':
         weights[BUFFER_KEY] = remainder
         weights[CASH_NAME] = 0.0
     elif mode == 'C':
-        # IEF? ?? ??
+        # IEF도 고점 체크
         if buffer_data is not None:
             buf_near = is_near_12month_high(buffer_data, as_of_date, threshold=0.05, price_col=price_col)
             if buf_near:
@@ -1289,7 +1215,7 @@ def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, pr
         else:
             weights[CASH_NAME] = remainder
     elif mode == 'D':
-        # SHV? ?? ??
+        # SHV도 고점 체크
         if buffer_data is not None:
             buf_near = is_near_12month_high(buffer_data, as_of_date, threshold=0.05, price_col=price_col)
             if buf_near:
@@ -1300,24 +1226,7 @@ def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, pr
                 weights[CASH_NAME] = remainder
         else:
             weights[CASH_NAME] = remainder
-    elif mode == 'E':
-        # ???? E: IEF? -5%? ?? + 12?? ????? ??? ?? IEF, ??? ??
-        if buffer_data is not None:
-            buf_near = is_near_12month_high(buffer_data, as_of_date, threshold=0.05, price_col=price_col)
-            now_px = get_price_at_date(buffer_data, as_of_date, price_col=price_col)
-            prev_12m_px = get_price_at_date(buffer_data, as_of_date - relativedelta(months=12), price_col=price_col)
-            buf_mom_ok = (now_px is not None and prev_12m_px is not None and prev_12m_px > 0 and now_px > prev_12m_px)
-            if buf_near and buf_mom_ok:
-                weights[BUFFER_KEY] = remainder
-                weights[CASH_NAME] = 0.0
-            else:
-                weights[BUFFER_KEY] = 0.0
-                weights[CASH_NAME] = remainder
-        else:
-            weights[CASH_NAME] = remainder
-    else:
-        weights[CASH_NAME] = remainder
-
+    
     return weights
 
 def simulate_faber_strategy(start_date, end_date, initial_capital, all_data, mode='A',
@@ -2275,34 +2184,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 allw_nav = allw_df
     except Exception:
         allw_nav = None
-    # Requested defensive variants (2000 forced equalization via deep proxy + chain-link)
-    ief_buffer_df = load_faber_buffer_data('IEF', data_start, current_date)
-    shv_buffer_df = load_faber_buffer_data('SHV', data_start, current_date)
 
-    faber_mode_b_nav = None
-    faber_mode_c_nav = None
-    faber_mode_d_nav = None
-    faber_mode_e_nav = None
-
-    if ief_buffer_df is not None and not ief_buffer_df.empty:
-        faber_mode_b_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='B', buffer_df=ief_buffer_df, price_col=price_col
-        )
-        faber_mode_c_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='C', buffer_df=ief_buffer_df, price_col=price_col
-        )
-        faber_mode_e_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='E', buffer_df=ief_buffer_df, price_col=price_col
-        )
-    if shv_buffer_df is not None and not shv_buffer_df.empty:
-        faber_mode_d_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='D', buffer_df=shv_buffer_df, price_col=price_col
-        )
-
+    # 성과 지표 (Faber A)
     s_value, s_return, s_mdd, s_cagr = calculate_performance_metrics(nav_df, IC)
     s_peak, s_valley, _ = find_mdd_period(nav_df)
     s_monthly_mdd = calculate_monthly_mdd(nav_df)
@@ -2355,52 +2238,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     def _fmt(v, fmt):
         return fmt.format(v) if v is not None else "-"
-
-
-    def _calc_recovery_summary(nav_s):
-        if nav_s is None or nav_s.empty:
-            return None
-        running_max = nav_s.expanding().max()
-        underwater_ratio = (nav_s < running_max).sum() / len(nav_s)
-        periods, in_dd, peak_idx = [], False, 0
-        nav_arr = nav_s.values
-        dates = nav_s.index
-        rmax_arr = running_max.values
-        for i in range(len(nav_arr)):
-            if nav_arr[i] < rmax_arr[i]:
-                if not in_dd:
-                    in_dd = True
-                    peak_idx = i
-                    for j in range(i, -1, -1):
-                        if rmax_arr[j] < rmax_arr[i]:
-                            peak_idx = j + 1
-                            break
-                        if j == 0:
-                            peak_idx = 0
-            else:
-                if in_dd:
-                    days = (dates[i] - dates[peak_idx]).days
-                    if days > 0:
-                        periods.append(days)
-                    in_dd = False
-
-        def _fmt_days(d):
-            if d is None or d == 0:
-                return "-"
-            y, m = int(d // 365), int((d % 365) // 30)
-            if y > 0 and m > 0:
-                return f"{y}y {m}m"
-            if y > 0:
-                return f"{y}y"
-            if m > 0:
-                return f"{m}m"
-            return f"{d}d"
-
-        return {
-            'Underwater Ratio': f"{underwater_ratio*100:.1f}%",
-            'Avg Recovery': _fmt_days(int(sum(periods) / len(periods))) if periods else "-",
-            'Max Recovery': _fmt_days(max(periods)) if periods else "-",
-        }
 
     quant_strategies = {
         "Faber A ⭐": nav_df,
@@ -2482,69 +2319,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
     st.markdown("---")
-    # ── 요청 룰: 방어자산 동적 체크 비교 ─────────────────────────────────────
-    # ?? ?? ?: ???? ?? ?? ?? ?????????????????????????????????????
-    st.markdown("---")
-    st.subheader("Dynamic Defensive Overlay (A/B/C/D/E)")
-    st.caption("Forced-2000 equalization: IEF/SHV use deep proxy (FRED) + ETF chain-link for fair long-history comparison.")
-    st.caption(
-        "A: OFF->Cash | B: OFF->IEF(always) | C: OFF->IEF(if IEF also passes -5% rule) | "
-        "D: OFF->SHV(if SHV also passes -5% rule) | E(new): OFF->IEF(if -5% rule AND 12M momentum > 0)"
-    )
-
-    dyn_map = {"A Base (OFF->Cash)": nav_df}
-    if faber_mode_b_nav is not None:
-        dyn_map["B OFF->IEF (always)"] = faber_mode_b_nav
-    if faber_mode_c_nav is not None:
-        dyn_map["C OFF->IEF (IEF gate)"] = faber_mode_c_nav
-    if faber_mode_d_nav is not None:
-        dyn_map["D OFF->SHV (SHV gate)"] = faber_mode_d_nav
-    if faber_mode_e_nav is not None:
-        dyn_map["E OFF->IEF (IEF gate + 12M mom)"] = faber_mode_e_nav
-
-    if len(dyn_map) >= 2:
-        dyn_aligned, dyn_meta, dyn_status_df = align_strategies_to_common_dates(dyn_map, min_obs_days=252)
-        if dyn_meta["common_obs"] > 0:
-            st.caption(
-                f"Common period: {dyn_meta['common_start'].strftime('%Y-%m-%d')} ~ "
-                f"{dyn_meta['common_end'].strftime('%Y-%m-%d')} ({dyn_meta['common_obs']} trading days)"
-            )
-
-            dyn_cmp = build_comparison_table(dyn_aligned, IC)
-            if dyn_cmp is not None:
-                st.dataframe(dyn_cmp, use_container_width=True)
-
-            extra_rows = []
-            recovery_rows = []
-            for name, nav_cut in dyn_aligned.items():
-                m = _strategy_metrics(nav_cut, IC)
-                if m is not None:
-                    extra_rows.append({
-                        "Strategy": name,
-                        "Ulcer Index": _fmt(m["ulcer"], "{:.2f}"),
-                        "Martin Ratio": _fmt(m["martin"], "{:.2f}"),
-                        "CVaR 5% (M)": _fmt(m["cvar_5"], "{:.2%}"),
-                        "Positive Month %": _fmt(m["pos_month"], "{:.1%}"),
-                    })
-                rec = _calc_recovery_summary(nav_cut["nav"]) if nav_cut is not None else None
-                if rec is not None:
-                    recovery_rows.append({"Strategy": name, **rec})
-
-            if extra_rows:
-                st.caption("Additional risk metrics (same common period)")
-                st.dataframe(pd.DataFrame(extra_rows), use_container_width=True, hide_index=True)
-            if recovery_rows:
-                st.caption("Recovery metrics (same common period)")
-                st.dataframe(pd.DataFrame(recovery_rows), use_container_width=True, hide_index=True)
-
-            if dyn_status_df is not None and not dyn_status_df.empty:
-                st.caption("Dynamic comparison status (common-period eligibility)")
-                st.dataframe(dyn_status_df, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No common dates available for dynamic comparison.")
-    else:
-        st.warning("Could not load enough IEF/SHV buffer data to run dynamic comparison.")
-
     st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
     st.caption("현금 없이 5자산 각 20%를 고정 후 월말 리밸런싱. Faber A의 타이밍 능력이 단순 분산 대비 얼마나 유효한지 확인합니다.")
 
