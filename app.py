@@ -1655,6 +1655,89 @@ def calculate_monthly_mdd(daily_nav_df):
     dd = calculate_monthly_drawdown_series(daily_nav_df)
     return float(dd.min()) if dd is not None and not dd.empty else None
 
+
+def calculate_ulcer_index(daily_nav_df):
+    """Ulcer Index: drawdown(%)의 RMS. 높을수록 체감 고통이 큼."""
+    if daily_nav_df is None or daily_nav_df.empty or "drawdown" not in daily_nav_df.columns:
+        return None
+    dd_pct = (daily_nav_df["drawdown"].dropna() * 100.0).values
+    if len(dd_pct) == 0:
+        return None
+    return float(np.sqrt(np.mean(np.square(dd_pct))))
+
+
+def calculate_martin_ratio(daily_nav_df, initial_capital):
+    """Martin Ratio: CAGR(%) / Ulcer Index(%)"""
+    if daily_nav_df is None or daily_nav_df.empty:
+        return None
+    _, _, _, cagr = calculate_performance_metrics(daily_nav_df, initial_capital)
+    ui = calculate_ulcer_index(daily_nav_df)
+    if cagr is None or ui is None or ui <= 0:
+        return None
+    return float((cagr * 100.0) / ui)
+
+
+def calculate_monthly_cvar(daily_nav_df, alpha=0.05):
+    """월수익률 기준 CVaR(기대손실). 보통 음수이며 더 낮을수록 꼬리위험 큼."""
+    if daily_nav_df is None or daily_nav_df.empty:
+        return None
+    monthly_nav = daily_nav_df["nav"].groupby(daily_nav_df.index.to_period("M")).last()
+    monthly_ret = monthly_nav.pct_change().dropna()
+    if len(monthly_ret) < 12:
+        return None
+    var = monthly_ret.quantile(alpha)
+    tail = monthly_ret[monthly_ret <= var]
+    if tail.empty:
+        return None
+    return float(tail.mean())
+
+
+def calculate_positive_month_ratio(daily_nav_df):
+    """월수익률이 +인 달의 비율."""
+    if daily_nav_df is None or daily_nav_df.empty:
+        return None
+    monthly_nav = daily_nav_df["nav"].groupby(daily_nav_df.index.to_period("M")).last()
+    monthly_ret = monthly_nav.pct_change().dropna()
+    if len(monthly_ret) == 0:
+        return None
+    return float((monthly_ret > 0).mean())
+
+
+def calculate_rolling_outperformance_rate(nav_a, nav_b, window_months=36):
+    """A가 B를 이긴 롤링 구간 비율. (월말 수익률 기준)"""
+    if nav_a is None or nav_b is None or nav_a.empty or nav_b.empty:
+        return None, 0
+    ma = nav_a["nav"].groupby(nav_a.index.to_period("M")).last()
+    mb = nav_b["nav"].groupby(nav_b.index.to_period("M")).last()
+    merged = pd.concat([ma.rename("A"), mb.rename("B")], axis=1).dropna()
+    if len(merged) <= window_months:
+        return None, 0
+    ra = merged["A"].pct_change(window_months)
+    rb = merged["B"].pct_change(window_months)
+    diff = (ra - rb).dropna()
+    if diff.empty:
+        return None, 0
+    return float((diff > 0).mean()), int(len(diff))
+
+
+def estimate_turnover_from_weight_series(weight_dicts, asset_keys):
+    """연속 목표비중 시계열로 월별 회전율(매수/매도 절반합) 추정."""
+    if weight_dicts is None or len(weight_dicts) < 2:
+        return None, None, 0
+    prev = None
+    turns = []
+    for w in weight_dicts:
+        vec = np.array([float(w.get(k, 0.0)) for k in asset_keys], dtype=float)
+        s = float(vec.sum())
+        if s > 0:
+            vec = vec / s
+        if prev is not None:
+            turns.append(float(0.5 * np.abs(vec - prev).sum()))
+        prev = vec
+    if len(turns) == 0:
+        return None, None, 0
+    return float(np.mean(turns)), float(np.max(turns)), int(len(turns))
+
 def find_monthly_mdd_period(daily_nav_df):
     if daily_nav_df is None or daily_nav_df.empty: return None, None, None
     dd_series = calculate_monthly_drawdown_series(daily_nav_df)
@@ -2143,9 +2226,15 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         _, _, mdd, cagr = calculate_performance_metrics(nav, ic)
         sharpe  = calculate_sharpe_ratio(nav)
         sortino = calculate_sortino_ratio(nav)
+        ulcer = calculate_ulcer_index(nav)
+        martin = calculate_martin_ratio(nav, ic)
+        cvar_5 = calculate_monthly_cvar(nav, alpha=0.05)
+        pos_month = calculate_positive_month_ratio(nav)
         cagr_mdd = (cagr / abs(mdd)) if (cagr is not None and cagr > 0 and mdd is not None and mdd < 0) else None
         return {"cagr": cagr, "mdd": mdd, "sharpe": sharpe,
-                "sortino": sortino, "cagr_mdd": cagr_mdd}
+                "sortino": sortino, "cagr_mdd": cagr_mdd,
+                "ulcer": ulcer, "martin": martin, "cvar_5": cvar_5,
+                "pos_month": pos_month}
 
     def _fmt(v, fmt):
         return fmt.format(v) if v is not None else "-"
@@ -2169,6 +2258,32 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     m_faber = _strategy_metrics(quant_aligned.get("Faber A ⭐"), IC)
     m_old = _strategy_metrics(quant_aligned.get("이전 전략(연속 모멘텀)"), IC)
 
+    faber_turn_avg = faber_turn_max = old_turn_avg = old_turn_max = None
+    win3 = n3 = win5 = n5 = None
+    if quant_meta["common_start"] is not None and quant_meta["common_end"] is not None:
+        td_quant = build_trading_calendar(all_data, quant_meta["common_start"], quant_meta["common_end"])
+        me_quant = _collect_month_end_dates(td_quant)
+        keys = list(ASSETS.keys()) + [CASH_NAME]
+
+        faber_ws = []
+        old_ws = []
+        for d in me_quant:
+            try:
+                faber_ws.append(calculate_faber_weights(d, all_data, mode='A', price_col=price_col))
+            except Exception:
+                pass
+            try:
+                old_ws.append(calculate_weights_at_date(d, all_data, price_col=price_col))
+            except Exception:
+                pass
+        faber_turn_avg, faber_turn_max, _ = estimate_turnover_from_weight_series(faber_ws, keys)
+        old_turn_avg, old_turn_max, _ = estimate_turnover_from_weight_series(old_ws, keys)
+
+        qf = quant_aligned.get("Faber A ⭐")
+        qo = quant_aligned.get("이전 전략(연속 모멘텀)")
+        win3, n3 = calculate_rolling_outperformance_rate(qf, qo, window_months=36)
+        win5, n5 = calculate_rolling_outperformance_rate(qf, qo, window_months=60)
+
     if m_faber is not None and m_old is not None:
         comparison_rows = [
             ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}")),
@@ -2176,9 +2291,24 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}")),
             ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}")),
             ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}")),
+            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}")),
+            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}")),
+            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}")),
+            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}")),
+            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}")),
+            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}")),
         ]
         df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
         st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+        if win3 is not None or win5 is not None:
+            rel_rows = [{
+                "상대지표": "Faber 승률 (3년 롤링, 누적수익률 기준)",
+                "값": f"{win3*100:.1f}% ({n3}구간)" if win3 is not None else "-",
+            }, {
+                "상대지표": "Faber 승률 (5년 롤링, 누적수익률 기준)",
+                "값": f"{win5*100:.1f}% ({n5}구간)" if win5 is not None else "-",
+            }]
+            st.dataframe(pd.DataFrame(rel_rows), use_container_width=True, hide_index=True)
     else:
         st.warning("⚠️ 전략 정량 비교를 위한 공통 기간 데이터가 부족합니다.")
 
