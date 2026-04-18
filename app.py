@@ -1321,6 +1321,135 @@ def simulate_faber_strategy(start_date, end_date, initial_capital, all_data, mod
     return df
 
 
+def _is_above_sma(historical_data, as_of_date, window=200, price_col="Adj Close"):
+    """Return True when current price is above SMA(window)."""
+    if historical_data is None or historical_data.empty:
+        return False
+    col = price_col if price_col in historical_data.columns else ("Adj Close" if "Adj Close" in historical_data.columns else "Close")
+    if col not in historical_data.columns:
+        return False
+    hist = historical_data[historical_data.index <= as_of_date][col].dropna()
+    if len(hist) < window:
+        return False
+    current = get_price_at_date(historical_data, as_of_date, price_col=col)
+    if current is None or current <= 0:
+        return False
+    sma = float(hist.iloc[-window:].mean())
+    return bool(current > sma)
+
+
+def _calculate_1m_return(historical_data, as_of_date, price_col="Adj Close"):
+    """Calculate 1-month return using month-end anchors."""
+    if historical_data is None or historical_data.empty:
+        return None
+    col = price_col if price_col in historical_data.columns else ("Adj Close" if "Adj Close" in historical_data.columns else "Close")
+    if col not in historical_data.columns:
+        return None
+    current = get_price_at_date(historical_data, as_of_date, price_col=col)
+    prev_me = get_month_end_date(as_of_date - relativedelta(months=1))
+    prev = get_price_at_date(historical_data, prev_me, price_col=col)
+    if current is None or prev is None or current <= 0 or prev <= 0:
+        return None
+    return float(current / prev - 1.0)
+
+
+def select_mean_reversion_asset(as_of_date, all_data, candidate_assets, price_col="Adj Close"):
+    """Select the worst 1M-return asset among candidates, filtered by 200d uptrend."""
+    scores = []
+    for asset_name in candidate_assets:
+        data = all_data.get(asset_name)
+        if data is None or data.empty:
+            continue
+        if not _is_above_sma(data, as_of_date, window=200, price_col=price_col):
+            continue
+        r1m = _calculate_1m_return(data, as_of_date, price_col=price_col)
+        if r1m is None:
+            continue
+        scores.append((asset_name, r1m))
+    if not scores:
+        return None
+    scores.sort(key=lambda x: x[1])  # lowest 1M return first
+    return scores[0][0]
+
+
+def simulate_mean_reversion_satellite(start_date, end_date, initial_capital, all_data,
+                                      price_col="Adj Close", candidate_assets=None):
+    """Monthly mean-reversion satellite: pick 1 most-depressed asset (with 200d filter)."""
+    trading_dates = build_trading_calendar(all_data, start_date, end_date)
+    if len(trading_dates) == 0:
+        return None
+
+    if candidate_assets is None:
+        # equity + equity + gold by ticker ids used in this project
+        ticker_set = {'294400', '133690', '411060'}
+        candidate_assets = [name for name, tk in ASSETS.items() if tk in ticker_set]
+    if not candidate_assets:
+        return None
+
+    actual_start = trading_dates[0]
+    holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
+    cash_px0 = get_price_at_date(all_data.get(CASH_NAME), actual_start, price_col=price_col)
+    if cash_px0 is None or cash_px0 <= 0:
+        cash_px0 = 10000.0
+    holdings[CASH_NAME] = initial_capital / cash_px0
+
+    daily_nav = []
+    last_valid_nav = float(initial_capital)
+    for i, date in enumerate(trading_dates):
+        pv_raw = _calc_portfolio_value(holdings, date, all_data, price_col)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
+        daily_nav.append({"date": date, "nav": pv})
+
+        if _is_month_end_rebalance_day(trading_dates, i) and date != actual_start:
+            pick = select_mean_reversion_asset(date, all_data, candidate_assets, price_col=price_col)
+            target_weights = {name: 0.0 for name in ASSETS.keys()}
+            if pick is not None:
+                target_weights[pick] = 1.0
+            target_weights[CASH_NAME] = max(0.0, 1.0 - sum(target_weights.values()))
+            rebalance_holdings(pv, date, target_weights, holdings, all_data, price_col=price_col)
+
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
+def combine_nav_series(nav_frames):
+    """Combine multiple nav series by summing daily NAV."""
+    nav_cols = []
+    for name, df in nav_frames.items():
+        if df is None or df.empty or "nav" not in df.columns:
+            continue
+        nav_cols.append(df["nav"].rename(name))
+    if not nav_cols:
+        return None
+    merged = pd.concat(nav_cols, axis=1).sort_index().ffill().dropna()
+    if merged.empty:
+        return None
+    out = pd.DataFrame(index=merged.index)
+    out["nav"] = merged.sum(axis=1)
+    out["running_max"] = out["nav"].expanding().max()
+    out["drawdown"] = (out["nav"] - out["running_max"]) / out["running_max"]
+    return out
+
+
+def simulate_faber_mode_g(start_date, end_date, initial_capital, all_data, price_col="Adj Close",
+                          core_weight=0.90, satellite_weight=0.10):
+    """Mode G: A core + mean-reversion satellite."""
+    core_nav = simulate_faber_strategy(
+        start_date, end_date, initial_capital * core_weight, all_data,
+        mode='A', buffer_df=None, price_col=price_col
+    )
+    sat_nav = simulate_mean_reversion_satellite(
+        start_date, end_date, initial_capital * satellite_weight, all_data,
+        price_col=price_col
+    )
+    return combine_nav_series({"core_a": core_nav, "sat_mr": sat_nav})
+
+
 # ==============================
 # 6. 시뮬레이션
 # ==============================
@@ -2325,13 +2454,14 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
         # ?? Faber A/B/C/D Overlay Comparison (non-invasive) ?????????????????????
     st.markdown("---")
-    st.subheader("Faber Defensive Overlay: A vs B/C/D/E/F")
+    st.subheader("Faber Defensive Overlay: A vs B/C/D/E/F/G")
     st.caption(
-        "Base Faber A is kept intact, and B/C/D/E/F overlays are compared on the same rules."
+        "Base Faber A is kept intact, and B/C/D/E/F/G overlays are compared on the same rules."
     )
     st.caption(
         "A: OFF->Cash | B: OFF->IEF(KRW, always) | C: OFF->IEF(KRW, IEF gate) | "
-        "D: OFF->SHV(KRW, SHV gate) | E: OFF->IEF(USD, always) | F: OFF->KTB10Y(KRW, always)"
+        "D: OFF->SHV(KRW, SHV gate) | E: OFF->IEF(USD, always) | "
+        "F: OFF->KTB10Y(KRW, always) | G: A90% + Mean-Reversion Satellite10%"
     )
 
     ief_buffer_df = _fetch_slot_proxy(
@@ -2351,7 +2481,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         data_start, current_date
     )
 
-    mode_b_nav = mode_c_nav = mode_d_nav = mode_e_nav = mode_f_nav = None
+    mode_b_nav = mode_c_nav = mode_d_nav = mode_e_nav = mode_f_nav = mode_g_nav = None
     if ief_buffer_df is not None and not ief_buffer_df.empty:
         mode_b_nav = simulate_faber_strategy(
             bt_start_date, current_date, IC, all_data,
@@ -2376,6 +2506,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             bt_start_date, current_date, IC, all_data,
             mode='F', buffer_df=kr10_buffer_df, price_col=price_col
         )
+    mode_g_nav = simulate_faber_mode_g(
+        bt_start_date, current_date, IC, all_data, price_col=price_col,
+        core_weight=0.90, satellite_weight=0.10
+    )
 
     overlay_map = {"A Base (OFF->Cash)": nav_df}
     if mode_b_nav is not None:
@@ -2388,6 +2522,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         overlay_map["E OFF->IEF(USD) (always)"] = mode_e_nav
     if mode_f_nav is not None:
         overlay_map["F OFF->KTB10Y(KRW) (always)"] = mode_f_nav
+    if mode_g_nav is not None:
+        overlay_map["G A90 + MR10 satellite"] = mode_g_nav
 
     if len(overlay_map) >= 2:
         ov_aligned, ov_meta, ov_status = align_strategies_to_common_dates(
