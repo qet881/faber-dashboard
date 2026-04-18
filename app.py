@@ -327,6 +327,10 @@ ASSETS = {
 
 CASH_TICKER = '455890'
 CASH_NAME = '현금(MMF)'
+KR_STOCK_MIX_ASSET = '코스피200'
+KR_BOND_10Y_MIX_ASSET = '한국국고채10년'
+KR_BOND_10Y_MIX_TICKER = '148070'
+KR_3ASSET_STRATEGY_LABEL = 'KR 3자산 평균모멘텀'
 
 KR_BOND_DURATION_FACTOR = 2.5
 
@@ -601,6 +605,48 @@ def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
     except Exception as e:
         st.warning(f"딥프록시(KR채권 FRED) 로딩 오류: {e}")
         return None
+
+
+@st.cache_data(ttl=86400)
+def fetch_deep_proxy_kr_bond_10y_fred(start_date, end_date):
+    """FRED IRLTLT01KRM156N(한국 장기금리 월별) → 10년 국고채 합성가격 딥프록시."""
+    try:
+        yields_raw = _fetch_fred_series('IRLTLT01KRM156N', start_date, end_date)
+        if yields_raw is None or yields_raw.empty:
+            return None
+        yields_raw = yields_raw.dropna()
+        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
+        yields = yields_raw.reindex(all_dates).ffill().dropna()
+        daily_yield_change = yields.diff() / 100
+        duration_10y = 10.0
+        daily_return = -duration_10y / (1 + yields.shift(1) / 100) * daily_yield_change
+        daily_return = daily_return.fillna(0.0)
+        price_10y = (1 + daily_return).cumprod() * 100
+        result = pd.DataFrame(index=price_10y.index)
+        result['Close'] = price_10y.values
+        result['Adj Close'] = result['Close']
+        return result
+    except Exception as e:
+        st.warning(f"딥프록시(KR국고채10년 FRED) 로딩 오류: {e}")
+        return None
+
+
+@st.cache_data(ttl=3600)
+def fetch_kr_bond_10y_chain_data(start_date, end_date):
+    """국고채10년 체인링크: 딥프록시(FRED) → KOSEF국고채10년(148070)."""
+    deep = fetch_deep_proxy_kr_bond_10y_fred(start_date, end_date)
+    etf_raw = _read_fdr_with_fallback(KR_BOND_10Y_MIX_TICKER, start_date, end_date)
+    etf_df = None
+    if etf_raw is not None and not etf_raw.empty and 'Close' in etf_raw.columns:
+        etf_raw = etf_raw[~etf_raw.index.duplicated(keep='last')].sort_index()
+        etf_df = pd.DataFrame(index=etf_raw.index)
+        etf_df['Close'] = etf_raw['Close'].astype(float)
+        etf_df['Adj Close'] = etf_raw['Adj Close'].astype(float) if 'Adj Close' in etf_raw.columns else etf_df['Close']
+    if deep is None or deep.empty:
+        return etf_df
+    if etf_df is None or etf_df.empty:
+        return deep
+    return _chain_link_series(deep, etf_df)
 
 
 @st.cache_data(ttl=86400)
@@ -1078,6 +1124,101 @@ def calculate_weights_at_date(as_of_date, all_data, price_col="Close"):
     cash_weight = max(0.0, 1.0 - sum(weights.values()))
     weights[CASH_NAME] = cash_weight
     return weights
+
+
+def build_kr_stock_bond_cash_avg_momentum_data(base_all_data, start_date, end_date):
+    """KR 3자산(코스피200/국고채10년/현금) 전략용 데이터셋 구성."""
+    if base_all_data is None:
+        return None
+    stock_df = base_all_data.get(KR_STOCK_MIX_ASSET)
+    cash_df = base_all_data.get(CASH_NAME)
+    if stock_df is None or stock_df.empty or cash_df is None or cash_df.empty:
+        return None
+    bond_df = base_all_data.get(KR_BOND_10Y_MIX_ASSET)
+    if bond_df is None or bond_df.empty:
+        lookback_start = start_date - relativedelta(months=18)
+        bond_df = fetch_kr_bond_10y_chain_data(lookback_start, end_date)
+    if bond_df is None or bond_df.empty:
+        return None
+    data = {
+        KR_STOCK_MIX_ASSET: stock_df,
+        f"{KR_STOCK_MIX_ASSET}_모멘텀": base_all_data.get(f"{KR_STOCK_MIX_ASSET}_모멘텀", stock_df),
+        KR_BOND_10Y_MIX_ASSET: bond_df,
+        f"{KR_BOND_10Y_MIX_ASSET}_모멘텀": bond_df,
+        CASH_NAME: cash_df,
+        f"{CASH_NAME}_모멘텀": base_all_data.get(f"{CASH_NAME}_모멘텀", cash_df),
+    }
+    return data
+
+
+def calculate_kr_stock_bond_cash_avg_momentum_weights(as_of_date, strategy_data, cash_score=1.0, price_col="Adj Close"):
+    """코스피200/국고채10년/현금(점수 1 고정) 비중형 평균 모멘텀."""
+    if strategy_data is None:
+        return {
+            KR_STOCK_MIX_ASSET: 0.0,
+            KR_BOND_10Y_MIX_ASSET: 0.0,
+            CASH_NAME: 1.0,
+        }
+    stock_mom = strategy_data.get(f"{KR_STOCK_MIX_ASSET}_모멘텀")
+    bond_mom = strategy_data.get(f"{KR_BOND_10Y_MIX_ASSET}_모멘텀")
+    _, stock_score = calculate_momentum_score_at_date(
+        KR_STOCK_MIX_ASSET, as_of_date, stock_mom, price_col=price_col
+    )
+    _, bond_score = calculate_momentum_score_at_date(
+        KR_BOND_10Y_MIX_ASSET, as_of_date, bond_mom, price_col=price_col
+    )
+    raw = {
+        KR_STOCK_MIX_ASSET: max(0.0, float(stock_score)) if stock_score is not None else 0.0,
+        KR_BOND_10Y_MIX_ASSET: max(0.0, float(bond_score)) if bond_score is not None else 0.0,
+        CASH_NAME: max(0.0, float(cash_score)),
+    }
+    total = float(sum(raw.values()))
+    if total <= 0:
+        return {
+            KR_STOCK_MIX_ASSET: 0.0,
+            KR_BOND_10Y_MIX_ASSET: 0.0,
+            CASH_NAME: 1.0,
+        }
+    return {k: v / total for k, v in raw.items()}
+
+
+def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, initial_capital, strategy_data, price_col="Adj Close"):
+    """KR 3자산 평균 모멘텀 비중 전략(월말 리밸런싱)."""
+    if strategy_data is None:
+        return None
+    trading_dates = build_trading_calendar(
+        strategy_data, start_date, end_date, anchor_name=KR_STOCK_MIX_ASSET
+    )
+    if len(trading_dates) == 0:
+        return None
+    actual_start = trading_dates[0]
+    holdings = {
+        KR_STOCK_MIX_ASSET: 0.0,
+        KR_BOND_10Y_MIX_ASSET: 0.0,
+        CASH_NAME: 0.0,
+    }
+    iw = calculate_kr_stock_bond_cash_avg_momentum_weights(
+        actual_start, strategy_data, cash_score=1.0, price_col=price_col
+    )
+    rebalance_holdings(initial_capital, actual_start, iw, holdings, strategy_data, price_col=price_col)
+    daily_nav = []
+    last_valid_nav = float(initial_capital)
+    for i, date in enumerate(trading_dates):
+        pv_raw = _calc_portfolio_value(holdings, date, strategy_data, price_col)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
+        daily_nav.append({"date": date, "nav": pv})
+        if _is_month_end_rebalance_day(trading_dates, i) and date != actual_start:
+            tw = calculate_kr_stock_bond_cash_avg_momentum_weights(
+                date, strategy_data, cash_score=1.0, price_col=price_col
+            )
+            rebalance_holdings(pv, date, tw, holdings, strategy_data, price_col=price_col)
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
 
 
 # ==============================
@@ -2296,6 +2437,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     gtaa_nav = simulate_gtaa_strategy(
         bt_start_date, current_date, IC, all_data, price_col=price_col
     )
+    kr_3asset_data = build_kr_stock_bond_cash_avg_momentum_data(all_data, bt_start_date, current_date)
+    kr_3asset_nav = simulate_kr_stock_bond_cash_avg_momentum_strategy(
+        bt_start_date, current_date, IC, kr_3asset_data, price_col=price_col
+    )
 
     # 동일비중 B&H
     static_nav = simulate_static_benchmark(bt_start_date, current_date, IC, all_data, price_col=price_col)
@@ -2355,7 +2500,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
-    st.caption("✅ 기준 확인: Faber A/이전 전략/GTAA 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다.")
+    st.caption(
+        "✅ 기준 확인: Faber A/이전 전략/GTAA/"
+        f"{KR_3ASSET_STRATEGY_LABEL} 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다."
+    )
 
     def _strategy_metrics(nav, ic):
         """nav DataFrame에서 CAGR/MDD/Sharpe/Sortino를 딕셔너리로 반환."""
@@ -2381,6 +2529,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         "Faber A ⭐": nav_df,
         "이전 전략(연속 모멘텀)": old_nav,
         "GTAA (10개월 SMA)": gtaa_nav,
+        KR_3ASSET_STRATEGY_LABEL: kr_3asset_nav,
     }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
         quant_strategies, min_obs_days=252
@@ -2392,13 +2541,18 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             f"({quant_meta['common_obs']}거래일)"
         )
     else:
-        st.warning("⚠️ Faber A/이전 전략/GTAA 간 공통 거래일이 없어 공정 비교가 불가합니다.")
+        st.warning(
+            "⚠️ Faber A/이전 전략/GTAA/"
+            f"{KR_3ASSET_STRATEGY_LABEL} 간 공통 거래일이 없어 공정 비교가 불가합니다."
+        )
 
     m_faber = _strategy_metrics(quant_aligned.get("Faber A ⭐"), IC)
     m_old = _strategy_metrics(quant_aligned.get("이전 전략(연속 모멘텀)"), IC)
     m_gtaa = _strategy_metrics(quant_aligned.get("GTAA (10개월 SMA)"), IC)
+    m_kr_3asset = _strategy_metrics(quant_aligned.get(KR_3ASSET_STRATEGY_LABEL), IC)
 
     faber_turn_avg = faber_turn_max = old_turn_avg = old_turn_max = gtaa_turn_avg = gtaa_turn_max = None
+    kr_3asset_turn_avg = kr_3asset_turn_max = None
     win3 = n3 = win5 = n5 = None
     if quant_meta["common_start"] is not None and quant_meta["common_end"] is not None:
         td_quant = build_trading_calendar(all_data, quant_meta["common_start"], quant_meta["common_end"])
@@ -2408,6 +2562,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         faber_ws = []
         old_ws = []
         gtaa_ws = []
+        kr_3asset_ws = []
         for d in me_quant:
             try:
                 faber_ws.append(calculate_faber_weights(d, all_data, mode='A', price_col=price_col))
@@ -2421,30 +2576,45 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 gtaa_ws.append(calculate_gtaa_weights(d, all_data, price_col=price_col))
             except Exception:
                 pass
+            try:
+                if kr_3asset_data is not None:
+                    kr_3asset_ws.append(
+                        calculate_kr_stock_bond_cash_avg_momentum_weights(
+                            d, kr_3asset_data, cash_score=1.0, price_col=price_col
+                        )
+                    )
+            except Exception:
+                pass
         faber_turn_avg, faber_turn_max, _ = estimate_turnover_from_weight_series(faber_ws, keys)
         old_turn_avg, old_turn_max, _ = estimate_turnover_from_weight_series(old_ws, keys)
         gtaa_turn_avg, gtaa_turn_max, _ = estimate_turnover_from_weight_series(gtaa_ws, keys)
+        kr_3asset_turn_avg, kr_3asset_turn_max, _ = estimate_turnover_from_weight_series(
+            kr_3asset_ws, [KR_STOCK_MIX_ASSET, KR_BOND_10Y_MIX_ASSET, CASH_NAME]
+        )
 
         qf = quant_aligned.get("Faber A ⭐")
         qo = quant_aligned.get("이전 전략(연속 모멘텀)")
         win3, n3 = calculate_rolling_outperformance_rate(qf, qo, window_months=36)
         win5, n5 = calculate_rolling_outperformance_rate(qf, qo, window_months=60)
 
-    if m_faber is not None and m_old is not None and m_gtaa is not None:
+    if m_faber is not None and m_old is not None and m_gtaa is not None and m_kr_3asset is not None:
         comparison_rows = [
-            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}"), _fmt(m_gtaa["cagr"], "{:.2%}")),
-            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}"), _fmt(m_gtaa["mdd"], "{:.2%}")),
-            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}"), _fmt(m_gtaa["sharpe"], "{:.2f}")),
-            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}"), _fmt(m_gtaa["sortino"], "{:.2f}")),
-            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}"), _fmt(m_gtaa["cagr_mdd"], "{:.2f}")),
-            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}"), _fmt(m_gtaa["ulcer"], "{:.2f}")),
-            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}"), _fmt(m_gtaa["martin"], "{:.2f}")),
-            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}"), _fmt(m_gtaa["cvar_5"], "{:.2%}")),
-            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}"), _fmt(m_gtaa["pos_month"], "{:.1%}")),
-            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}"), _fmt(gtaa_turn_avg, "{:.1%}")),
-            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}"), _fmt(gtaa_turn_max, "{:.1%}")),
+            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}"), _fmt(m_gtaa["cagr"], "{:.2%}"), _fmt(m_kr_3asset["cagr"], "{:.2%}")),
+            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}"), _fmt(m_gtaa["mdd"], "{:.2%}"), _fmt(m_kr_3asset["mdd"], "{:.2%}")),
+            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}"), _fmt(m_gtaa["sharpe"], "{:.2f}"), _fmt(m_kr_3asset["sharpe"], "{:.2f}")),
+            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}"), _fmt(m_gtaa["sortino"], "{:.2f}"), _fmt(m_kr_3asset["sortino"], "{:.2f}")),
+            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}"), _fmt(m_gtaa["cagr_mdd"], "{:.2f}"), _fmt(m_kr_3asset["cagr_mdd"], "{:.2f}")),
+            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}"), _fmt(m_gtaa["ulcer"], "{:.2f}"), _fmt(m_kr_3asset["ulcer"], "{:.2f}")),
+            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}"), _fmt(m_gtaa["martin"], "{:.2f}"), _fmt(m_kr_3asset["martin"], "{:.2f}")),
+            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}"), _fmt(m_gtaa["cvar_5"], "{:.2%}"), _fmt(m_kr_3asset["cvar_5"], "{:.2%}")),
+            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}"), _fmt(m_gtaa["pos_month"], "{:.1%}"), _fmt(m_kr_3asset["pos_month"], "{:.1%}")),
+            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}"), _fmt(gtaa_turn_avg, "{:.1%}"), _fmt(kr_3asset_turn_avg, "{:.1%}")),
+            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}"), _fmt(gtaa_turn_max, "{:.1%}"), _fmt(kr_3asset_turn_max, "{:.1%}")),
         ]
-        df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)", "GTAA (10개월 SMA)"])
+        df_cmp = pd.DataFrame(
+            comparison_rows,
+            columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)", "GTAA (10개월 SMA)", KR_3ASSET_STRATEGY_LABEL]
+        )
         st.dataframe(df_cmp, use_container_width=True, hide_index=True)
         if win3 is not None or win5 is not None:
             rel_rows = [{
