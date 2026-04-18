@@ -1186,6 +1186,36 @@ def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, init
     """KR 3자산 평균 모멘텀 비중 전략(월말 리밸런싱)."""
     if strategy_data is None:
         return None
+    strategy_assets = [KR_STOCK_MIX_ASSET, KR_BOND_10Y_MIX_ASSET]
+
+    def _rebalance_for_strategy_assets(portfolio_value, date, target_weights, holdings):
+        cash_price = get_price_at_date(strategy_data.get(CASH_NAME), date, price_col=price_col)
+        if cash_price is None or cash_price <= 0:
+            cash_price = 10000.0
+        cash_target_value = portfolio_value * float(target_weights.get(CASH_NAME, 0.0))
+        for asset_name in strategy_assets:
+            w = float(target_weights.get(asset_name, 0.0))
+            target_value = portfolio_value * w
+            px = get_price_at_date(strategy_data.get(asset_name), date, price_col=price_col)
+            if px is None or px <= 0:
+                holdings[asset_name] = 0.0
+                cash_target_value += target_value
+                continue
+            holdings[asset_name] = target_value / px
+        holdings[CASH_NAME] = cash_target_value / cash_price if cash_price > 0 else 0.0
+
+    def _calc_strategy_portfolio_value(holdings, date):
+        pv = 0.0
+        for asset_name in strategy_assets:
+            px = get_price_at_date(strategy_data.get(asset_name), date, price_col=price_col)
+            if px is not None and px > 0:
+                pv += holdings.get(asset_name, 0.0) * px
+        cash_px = get_price_at_date(strategy_data.get(CASH_NAME), date, price_col=price_col)
+        if cash_px is None or cash_px <= 0:
+            cash_px = 10000.0
+        pv += holdings.get(CASH_NAME, 0.0) * cash_px
+        return pv
+
     trading_dates = build_trading_calendar(
         strategy_data, start_date, end_date, anchor_name=KR_STOCK_MIX_ASSET
     )
@@ -1200,11 +1230,11 @@ def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, init
     iw = calculate_kr_stock_bond_cash_avg_momentum_weights(
         actual_start, strategy_data, cash_score=1.0, price_col=price_col
     )
-    rebalance_holdings(initial_capital, actual_start, iw, holdings, strategy_data, price_col=price_col)
+    _rebalance_for_strategy_assets(initial_capital, actual_start, iw, holdings)
     daily_nav = []
     last_valid_nav = float(initial_capital)
     for i, date in enumerate(trading_dates):
-        pv_raw = _calc_portfolio_value(holdings, date, strategy_data, price_col)
+        pv_raw = _calc_strategy_portfolio_value(holdings, date)
         pv = _safe_nav_value(pv_raw, last_valid_nav)
         if pv is None:
             pv = float(initial_capital)
@@ -1214,7 +1244,7 @@ def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, init
             tw = calculate_kr_stock_bond_cash_avg_momentum_weights(
                 date, strategy_data, cash_score=1.0, price_col=price_col
             )
-            rebalance_holdings(pv, date, tw, holdings, strategy_data, price_col=price_col)
+            _rebalance_for_strategy_assets(pv, date, tw, holdings)
     df = pd.DataFrame(daily_nav).set_index("date").sort_index()
     df["running_max"] = df["nav"].expanding().max()
     df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
