@@ -997,6 +997,17 @@ def _fetch_slot_proxy(slot_config, start_date, end_date):
             r = pd.DataFrame(index=m.index)
             r['Close'] = m['US'] * m['FX']; r['Adj Close'] = r['Close']
             return r
+        elif ptype == 'us_etf':
+            us = fdr.DataReader(ticker, start_date, end_date)
+            if us is None or us.empty:
+                return None
+            us = us[~us.index.duplicated(keep='last')].sort_index()
+            if 'Close' not in us.columns:
+                return None
+            r = pd.DataFrame(index=us.index)
+            r['Close'] = us['Close']
+            r['Adj Close'] = us['Adj Close'] if 'Adj Close' in us.columns else us['Close']
+            return r
         return None
     except Exception as e:
         st.warning(f"슬롯 프록시 오류 ({ticker}): {e}")
@@ -1166,10 +1177,11 @@ def simulate_gtaa_strategy(start_date, end_date, initial_capital, all_data, pric
 def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, price_col="Adj Close"):
     """Faber 12-Month High Switch 비중 계산.
     mode A: 고점근처→20%, 나머지→현금
-    mode B: 고점근처→20%, 나머지→IEF×환율 (무조건)
-    mode C: 고점근처→20%, 나머지→IEF×환율 (IEF도 고점체크, 아니면 현금)
-    mode D: 고점근처→20%, 나머지→SHV×환율 (SHV도 고점체크, 아니면 현금)
-    mode E: 고점근처 AND 모멘텀>0 → 20%*모멘텀, 나머지→현금 (하이브리드)
+    mode B: 고점근처→20%, 나머지→버퍼자산(항상)
+    mode C: 고점근처→20%, 나머지→버퍼자산(버퍼도 12M 고점근접일 때만, 아니면 현금)
+    mode D: mode C와 동일(주로 SHV*KRW 버퍼에 사용)
+    mode E: mode B와 동일(IEF USD, 환노출 없음 버퍼에 사용)
+    mode F: mode B와 동일(한국10년채 버퍼에 사용)
     """
     weights = {}
     BUFFER_KEY = '_faber_buffer_'
@@ -1183,23 +1195,14 @@ def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, pr
             signal_data = all_data.get(asset_name)
         near_high = is_near_12month_high(signal_data, as_of_date, threshold=0.05, price_col=price_col)
         
-        if mode == 'E':
-            # 하이브리드: 고점 근처일 때만 모멘텀 비중 적용
-            mom_data = all_data.get(f"{asset_name}_모멘텀")
-            _, score = calculate_momentum_score_at_date(ticker, as_of_date, mom_data, price_col=price_col)
-            if near_high and score is not None and score > 0:
-                weights[asset_name] = 0.20 * score
-            else:
-                weights[asset_name] = 0.0
-        else:
-            # 이진: 고점 근처면 20%, 아니면 0%
-            weights[asset_name] = 0.20 if near_high else 0.0
+        # 이진: 고점 근처면 20%, 아니면 0%
+        weights[asset_name] = 0.20 if near_high else 0.0
     
     remainder = max(0.0, 1.0 - sum(weights.values()))
     
-    if mode == 'A' or mode == 'E':
+    if mode == 'A':
         weights[CASH_NAME] = remainder
-    elif mode == 'B':
+    elif mode in ('B', 'E', 'F'):
         weights[BUFFER_KEY] = remainder
         weights[CASH_NAME] = 0.0
     elif mode == 'C':
@@ -1226,6 +1229,8 @@ def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, pr
                 weights[CASH_NAME] = remainder
         else:
             weights[CASH_NAME] = remainder
+    else:
+        weights[CASH_NAME] = remainder
     
     return weights
 
@@ -2320,12 +2325,13 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
         # ?? Faber A/B/C/D Overlay Comparison (non-invasive) ?????????????????????
     st.markdown("---")
-    st.subheader("??? Faber Defensive Overlay: A vs B/C/D")
+    st.subheader("Faber Defensive Overlay: A vs B/C/D/E/F")
     st.caption(
-        "?? Faber A ??? ??? ????, ?? ???? B/C/D? ??? ??? ?? ???? ?????."
+        "Base Faber A is kept intact, and B/C/D/E/F overlays are compared on the same rules."
     )
     st.caption(
-        "A: OFF->Cash | B: OFF->IEF(always) | C: OFF->IEF(IEF gate) | D: OFF->SHV(SHV gate)"
+        "A: OFF->Cash | B: OFF->IEF(KRW, always) | C: OFF->IEF(KRW, IEF gate) | "
+        "D: OFF->SHV(KRW, SHV gate) | E: OFF->IEF(USD, always) | F: OFF->KTB10Y(KRW, always)"
     )
 
     ief_buffer_df = _fetch_slot_proxy(
@@ -2336,8 +2342,16 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         {'proxy': 'SHV', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
         data_start, current_date
     )
+    ief_usd_buffer_df = _fetch_slot_proxy(
+        {'proxy': 'IEF', 'proxy_type': 'us_etf'},
+        data_start, current_date
+    )
+    kr10_buffer_df = _fetch_slot_proxy(
+        {'proxy': '148070', 'proxy_type': 'kr_etf'},
+        data_start, current_date
+    )
 
-    mode_b_nav = mode_c_nav = mode_d_nav = None
+    mode_b_nav = mode_c_nav = mode_d_nav = mode_e_nav = mode_f_nav = None
     if ief_buffer_df is not None and not ief_buffer_df.empty:
         mode_b_nav = simulate_faber_strategy(
             bt_start_date, current_date, IC, all_data,
@@ -2352,14 +2366,28 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             bt_start_date, current_date, IC, all_data,
             mode='D', buffer_df=shv_buffer_df, price_col=price_col
         )
+    if ief_usd_buffer_df is not None and not ief_usd_buffer_df.empty:
+        mode_e_nav = simulate_faber_strategy(
+            bt_start_date, current_date, IC, all_data,
+            mode='E', buffer_df=ief_usd_buffer_df, price_col=price_col
+        )
+    if kr10_buffer_df is not None and not kr10_buffer_df.empty:
+        mode_f_nav = simulate_faber_strategy(
+            bt_start_date, current_date, IC, all_data,
+            mode='F', buffer_df=kr10_buffer_df, price_col=price_col
+        )
 
     overlay_map = {"A Base (OFF->Cash)": nav_df}
     if mode_b_nav is not None:
-        overlay_map["B OFF->IEF (always)"] = mode_b_nav
+        overlay_map["B OFF->IEF(KRW) (always)"] = mode_b_nav
     if mode_c_nav is not None:
-        overlay_map["C OFF->IEF (IEF gate)"] = mode_c_nav
+        overlay_map["C OFF->IEF(KRW) (IEF gate)"] = mode_c_nav
     if mode_d_nav is not None:
-        overlay_map["D OFF->SHV (SHV gate)"] = mode_d_nav
+        overlay_map["D OFF->SHV(KRW) (SHV gate)"] = mode_d_nav
+    if mode_e_nav is not None:
+        overlay_map["E OFF->IEF(USD) (always)"] = mode_e_nav
+    if mode_f_nav is not None:
+        overlay_map["F OFF->KTB10Y(KRW) (always)"] = mode_f_nav
 
     if len(overlay_map) >= 2:
         ov_aligned, ov_meta, ov_status = align_strategies_to_common_dates(
@@ -2397,7 +2425,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         else:
             st.warning("Overlay comparison is unavailable because there are no common dates.")
     else:
-        st.warning("Overlay comparison is unavailable because IEF/SHV buffer data could not be loaded.")
+        st.warning("Overlay comparison is unavailable because overlay buffer data could not be loaded.")
 
     st.markdown("---")
     st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
