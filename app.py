@@ -200,6 +200,58 @@ def get_usdkrw_series(start_date, end_date):
     return out
 
 
+def _to_price_df_from_close_series(close_series):
+    if close_series is None:
+        return None
+    s = pd.to_numeric(pd.Series(close_series), errors="coerce").dropna()
+    if s.empty:
+        return None
+    s = s[~s.index.duplicated(keep="last")].sort_index()
+    out = pd.DataFrame(index=s.index)
+    out["Close"] = s.astype(float)
+    out["Adj Close"] = out["Close"]
+    return out
+
+
+@st.cache_data(ttl=86400)
+def get_fx_series_to_krw(base_ccy, start_date, end_date):
+    """base_ccy/KRW 환율 시계열 생성. direct 우선, 실패 시 USD cross 사용."""
+    ccy = str(base_ccy).upper().strip()
+    if ccy == "USD":
+        return get_usdkrw_series(start_date, end_date)
+
+    # 1) direct quote (예: CNY/KRW)
+    try:
+        direct = fdr.DataReader(f"{ccy}/KRW", start_date, end_date)
+        if direct is not None and not direct.empty and "Close" in direct.columns:
+            s = direct["Close"].astype(float)
+            s = s[~s.index.duplicated(keep="last")].sort_index()
+            df = _to_price_df_from_close_series(s)
+            if df is not None and not df.empty:
+                return df
+    except Exception:
+        pass
+
+    # 2) USD cross: (USD/KRW) / (USD/base_ccy)
+    try:
+        usdkrw = get_usdkrw_series(start_date, end_date)
+        usdbase = fdr.DataReader(f"USD/{ccy}", start_date, end_date)
+        if (
+            usdkrw is None or usdkrw.empty or
+            usdbase is None or usdbase.empty or "Close" not in usdbase.columns
+        ):
+            return None
+        lhs = usdkrw["Close"].astype(float)
+        rhs = usdbase["Close"].astype(float)
+        merged = pd.concat([lhs.rename("USDKRW"), rhs.rename("USDBASE")], axis=1).ffill().dropna()
+        if merged.empty:
+            return None
+        cross = (merged["USDKRW"] / merged["USDBASE"]).replace([np.inf, -np.inf], np.nan).dropna()
+        return _to_price_df_from_close_series(cross)
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=20)
 def get_realtime_kodex_gold_active():
     """KODEX 금액티브(0064K0) 실시간 시세 조회. 실패 시 None."""
@@ -331,6 +383,11 @@ KR_STOCK_MIX_ASSET = '코스피200'
 KR_BOND_10Y_MIX_ASSET = '한국국고채10년'
 KR_BOND_10Y_MIX_TICKER = '148070'
 KR_3ASSET_STRATEGY_LABEL = 'KR 3자산 평균모멘텀'
+CHINA_CSI300_CNY_ASSET = '중국CSI300(위안화 노출)'
+INDIA_NIFTY_INR_ASSET = '인도니프티(루피 노출)'
+FABER_EX_BONDS_3_LABEL = 'Faber A (한·미·금 3자산)'
+FABER_EX_BONDS_4_LABEL = 'Faber A (한·미·중국·금 4자산)'
+FABER_EX_BONDS_5_LABEL = 'Faber A (한·미·중국·인도·금 5자산)'
 
 KR_BOND_DURATION_FACTOR = 2.5
 
@@ -647,6 +704,72 @@ def fetch_kr_bond_10y_chain_data(start_date, end_date):
     if etf_df is None or etf_df.empty:
         return deep
     return _chain_link_series(deep, etf_df)
+
+
+def _fetch_price_df_from_fdr_candidates(candidates, start_date, end_date):
+    for symbol in candidates:
+        try:
+            raw = fdr.DataReader(symbol, start_date, end_date)
+            if raw is None or raw.empty or "Close" not in raw.columns:
+                continue
+            raw = raw[~raw.index.duplicated(keep="last")].sort_index()
+            out = pd.DataFrame(index=raw.index)
+            out["Close"] = raw["Close"].astype(float)
+            out["Adj Close"] = raw["Adj Close"].astype(float) if "Adj Close" in raw.columns else out["Close"]
+            return out
+        except Exception:
+            continue
+    return None
+
+
+def _convert_local_price_to_krw(local_price_df, fx_to_krw_df):
+    if local_price_df is None or local_price_df.empty or fx_to_krw_df is None or fx_to_krw_df.empty:
+        return None
+    col_local = "Adj Close" if "Adj Close" in local_price_df.columns else "Close"
+    merged = pd.concat(
+        [local_price_df[col_local].rename("LOCAL"), fx_to_krw_df["Close"].rename("FX")],
+        axis=1
+    ).ffill().dropna()
+    if merged.empty:
+        return None
+    out = pd.DataFrame(index=merged.index)
+    out["Close"] = (merged["LOCAL"] * merged["FX"]).astype(float)
+    out["Adj Close"] = out["Close"]
+    return out
+
+
+@st.cache_data(ttl=86400)
+def fetch_china_csi300_cny_krw_chain(start_date, end_date):
+    """중국 CSI300(위안화 노출) KRW 시계열: SSEC(딥) → CSI300(000300) 체인."""
+    fx = get_fx_series_to_krw("CNY", start_date, end_date)
+    if fx is None or fx.empty:
+        return None
+    deep_cny = _fetch_price_df_from_fdr_candidates(["SSEC"], start_date, end_date)
+    csi_cny = _fetch_price_df_from_fdr_candidates(["000300"], start_date, end_date)
+    deep_krw = _convert_local_price_to_krw(deep_cny, fx)
+    csi_krw = _convert_local_price_to_krw(csi_cny, fx)
+    if deep_krw is None or deep_krw.empty:
+        return csi_krw
+    if csi_krw is None or csi_krw.empty:
+        return deep_krw
+    return _chain_link_series(deep_krw, csi_krw)
+
+
+@st.cache_data(ttl=86400)
+def fetch_india_nifty_inr_krw_chain(start_date, end_date):
+    """인도 NIFTY(루피 노출) KRW 시계열: BSESN(딥) → NIFTY(^NSEI) 체인."""
+    fx = get_fx_series_to_krw("INR", start_date, end_date)
+    if fx is None or fx.empty:
+        return None
+    deep_inr = _fetch_price_df_from_fdr_candidates(["^BSESN"], start_date, end_date)
+    nifty_inr = _fetch_price_df_from_fdr_candidates(["^NSEI"], start_date, end_date)
+    deep_krw = _convert_local_price_to_krw(deep_inr, fx)
+    nifty_krw = _convert_local_price_to_krw(nifty_inr, fx)
+    if deep_krw is None or deep_krw.empty:
+        return nifty_krw
+    if nifty_krw is None or nifty_krw.empty:
+        return deep_krw
+    return _chain_link_series(deep_krw, nifty_krw)
 
 
 @st.cache_data(ttl=86400)
@@ -1245,6 +1368,125 @@ def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, init
                 date, strategy_data, cash_score=1.0, price_col=price_col
             )
             _rebalance_for_strategy_assets(pv, date, tw, holdings)
+    df = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df["running_max"] = df["nav"].expanding().max()
+    df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
+    return df
+
+
+def build_faber_ex_bonds_strategy_data(base_all_data, start_date, end_date, include_china=False, include_india=False):
+    """Faber A 변형(채권 제외) 전략용 데이터셋 구성."""
+    if base_all_data is None:
+        return None
+    required = ['코스피200', '미국나스닥100', '금현물', CASH_NAME]
+    for name in required:
+        df = base_all_data.get(name)
+        if df is None or df.empty:
+            return None
+
+    data = {
+        '코스피200': base_all_data.get('코스피200'),
+        '코스피200_모멘텀': base_all_data.get('코스피200_모멘텀', base_all_data.get('코스피200')),
+        '미국나스닥100': base_all_data.get('미국나스닥100'),
+        '미국나스닥100_모멘텀': base_all_data.get('미국나스닥100_모멘텀', base_all_data.get('미국나스닥100')),
+        '금현물': base_all_data.get('금현물'),
+        '금현물_모멘텀': base_all_data.get('금현물_모멘텀', base_all_data.get('금현물')),
+        CASH_NAME: base_all_data.get(CASH_NAME),
+        f'{CASH_NAME}_모멘텀': base_all_data.get(f'{CASH_NAME}_모멘텀', base_all_data.get(CASH_NAME)),
+    }
+
+    lookback_start = start_date - relativedelta(months=18)
+    if include_china:
+        china_df = fetch_china_csi300_cny_krw_chain(lookback_start, end_date)
+        if china_df is None or china_df.empty:
+            return None
+        data[CHINA_CSI300_CNY_ASSET] = china_df
+        data[f"{CHINA_CSI300_CNY_ASSET}_모멘텀"] = china_df
+
+    if include_india:
+        india_df = fetch_india_nifty_inr_krw_chain(lookback_start, end_date)
+        if india_df is None or india_df.empty:
+            return None
+        data[INDIA_NIFTY_INR_ASSET] = india_df
+        data[f"{INDIA_NIFTY_INR_ASSET}_모멘텀"] = india_df
+
+    return data
+
+
+def calculate_faber_weights_for_assets(as_of_date, strategy_data, asset_names, threshold=0.05, price_col="Adj Close"):
+    """선택 자산군에 Faber A(-5%) 룰을 적용한 동일비중 타겟 비중."""
+    if strategy_data is None or not asset_names:
+        return {CASH_NAME: 1.0}
+    n_assets = len(asset_names)
+    unit_w = 1.0 / float(n_assets)
+    weights = {}
+    for asset_name in asset_names:
+        signal_data = strategy_data.get(f"{asset_name}_모멘텀", strategy_data.get(asset_name))
+        near_high = is_near_12month_high(signal_data, as_of_date, threshold=threshold, price_col=price_col)
+        weights[asset_name] = unit_w if near_high else 0.0
+    weights[CASH_NAME] = max(0.0, 1.0 - sum(weights.values()))
+    return weights
+
+
+def simulate_faber_subset_strategy(start_date, end_date, initial_capital, strategy_data, asset_names, price_col="Adj Close"):
+    """선택 자산군 대상 Faber A(-5%) 동일룰 시뮬레이션."""
+    if strategy_data is None or not asset_names:
+        return None
+    strategy_assets = list(asset_names)
+
+    def _rebalance_subset(portfolio_value, date, target_weights, holdings):
+        cash_price = get_price_at_date(strategy_data.get(CASH_NAME), date, price_col=price_col)
+        if cash_price is None or cash_price <= 0:
+            cash_price = 10000.0
+        cash_target_value = portfolio_value * float(target_weights.get(CASH_NAME, 0.0))
+        for asset_name in strategy_assets:
+            w = float(target_weights.get(asset_name, 0.0))
+            target_value = portfolio_value * w
+            px = get_price_at_date(strategy_data.get(asset_name), date, price_col=price_col)
+            if px is None or px <= 0:
+                holdings[asset_name] = 0.0
+                cash_target_value += target_value
+                continue
+            holdings[asset_name] = target_value / px
+        holdings[CASH_NAME] = cash_target_value / cash_price if cash_price > 0 else 0.0
+
+    def _calc_subset_nav(holdings, date):
+        pv = 0.0
+        for asset_name in strategy_assets:
+            px = get_price_at_date(strategy_data.get(asset_name), date, price_col=price_col)
+            if px is not None and px > 0:
+                pv += holdings.get(asset_name, 0.0) * px
+        cash_px = get_price_at_date(strategy_data.get(CASH_NAME), date, price_col=price_col)
+        if cash_px is None or cash_px <= 0:
+            cash_px = 10000.0
+        pv += holdings.get(CASH_NAME, 0.0) * cash_px
+        return pv
+
+    trading_dates = build_trading_calendar(strategy_data, start_date, end_date, anchor_name='코스피200')
+    if len(trading_dates) == 0:
+        return None
+    actual_start = trading_dates[0]
+    holdings = {k: 0.0 for k in strategy_assets + [CASH_NAME]}
+    iw = calculate_faber_weights_for_assets(
+        actual_start, strategy_data, strategy_assets, threshold=0.05, price_col=price_col
+    )
+    _rebalance_subset(initial_capital, actual_start, iw, holdings)
+
+    daily_nav = []
+    last_valid_nav = float(initial_capital)
+    for i, date in enumerate(trading_dates):
+        pv_raw = _calc_subset_nav(holdings, date)
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = float(initial_capital)
+        last_valid_nav = pv
+        daily_nav.append({"date": date, "nav": pv})
+        if _is_month_end_rebalance_day(trading_dates, i) and date != actual_start:
+            tw = calculate_faber_weights_for_assets(
+                date, strategy_data, strategy_assets, threshold=0.05, price_col=price_col
+            )
+            _rebalance_subset(pv, date, tw, holdings)
+
     df = pd.DataFrame(daily_nav).set_index("date").sort_index()
     df["running_max"] = df["nav"].expanding().max()
     df["drawdown"] = (df["nav"] - df["running_max"]) / df["running_max"]
@@ -2471,6 +2713,27 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     kr_3asset_nav = simulate_kr_stock_bond_cash_avg_momentum_strategy(
         bt_start_date, current_date, IC, kr_3asset_data, price_col=price_col
     )
+    faber_ex3_assets = ['코스피200', '미국나스닥100', '금현물']
+    faber_ex4_assets = ['코스피200', '미국나스닥100', CHINA_CSI300_CNY_ASSET, '금현물']
+    faber_ex5_assets = ['코스피200', '미국나스닥100', CHINA_CSI300_CNY_ASSET, INDIA_NIFTY_INR_ASSET, '금현물']
+    faber_ex3_data = build_faber_ex_bonds_strategy_data(
+        all_data, bt_start_date, current_date, include_china=False, include_india=False
+    )
+    faber_ex4_data = build_faber_ex_bonds_strategy_data(
+        all_data, bt_start_date, current_date, include_china=True, include_india=False
+    )
+    faber_ex5_data = build_faber_ex_bonds_strategy_data(
+        all_data, bt_start_date, current_date, include_china=True, include_india=True
+    )
+    faber_ex3_nav = simulate_faber_subset_strategy(
+        bt_start_date, current_date, IC, faber_ex3_data, faber_ex3_assets, price_col=price_col
+    )
+    faber_ex4_nav = simulate_faber_subset_strategy(
+        bt_start_date, current_date, IC, faber_ex4_data, faber_ex4_assets, price_col=price_col
+    )
+    faber_ex5_nav = simulate_faber_subset_strategy(
+        bt_start_date, current_date, IC, faber_ex5_data, faber_ex5_assets, price_col=price_col
+    )
 
     # 동일비중 B&H
     static_nav = simulate_static_benchmark(bt_start_date, current_date, IC, all_data, price_col=price_col)
@@ -2530,9 +2793,19 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
+    quant_labels = [
+        "Faber A ⭐",
+        "이전 전략(연속 모멘텀)",
+        "GTAA (10개월 SMA)",
+        KR_3ASSET_STRATEGY_LABEL,
+        FABER_EX_BONDS_3_LABEL,
+        FABER_EX_BONDS_4_LABEL,
+        FABER_EX_BONDS_5_LABEL,
+    ]
     st.caption(
-        "✅ 기준 확인: Faber A/이전 전략/GTAA/"
-        f"{KR_3ASSET_STRATEGY_LABEL} 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다."
+        "✅ 기준 확인: "
+        + " / ".join(quant_labels)
+        + " 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다."
     )
 
     def _strategy_metrics(nav, ic):
@@ -2560,6 +2833,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         "이전 전략(연속 모멘텀)": old_nav,
         "GTAA (10개월 SMA)": gtaa_nav,
         KR_3ASSET_STRATEGY_LABEL: kr_3asset_nav,
+        FABER_EX_BONDS_3_LABEL: faber_ex3_nav,
+        FABER_EX_BONDS_4_LABEL: faber_ex4_nav,
+        FABER_EX_BONDS_5_LABEL: faber_ex5_nav,
     }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
         quant_strategies, min_obs_days=252
@@ -2572,79 +2848,96 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         )
     else:
         st.warning(
-            "⚠️ Faber A/이전 전략/GTAA/"
-            f"{KR_3ASSET_STRATEGY_LABEL} 간 공통 거래일이 없어 공정 비교가 불가합니다."
+            "⚠️ "
+            + " / ".join(quant_labels)
+            + " 간 공통 거래일이 없어 공정 비교가 불가합니다."
         )
 
-    m_faber = _strategy_metrics(quant_aligned.get("Faber A ⭐"), IC)
-    m_old = _strategy_metrics(quant_aligned.get("이전 전략(연속 모멘텀)"), IC)
-    m_gtaa = _strategy_metrics(quant_aligned.get("GTAA (10개월 SMA)"), IC)
-    m_kr_3asset = _strategy_metrics(quant_aligned.get(KR_3ASSET_STRATEGY_LABEL), IC)
-
-    faber_turn_avg = faber_turn_max = old_turn_avg = old_turn_max = gtaa_turn_avg = gtaa_turn_max = None
-    kr_3asset_turn_avg = kr_3asset_turn_max = None
+    quant_metrics = {name: _strategy_metrics(quant_aligned.get(name), IC) for name in quant_labels}
+    turnover_stats = {name: (None, None) for name in quant_labels}
     win3 = n3 = win5 = n5 = None
     if quant_meta["common_start"] is not None and quant_meta["common_end"] is not None:
         td_quant = build_trading_calendar(all_data, quant_meta["common_start"], quant_meta["common_end"])
         me_quant = _collect_month_end_dates(td_quant)
-        keys = list(ASSETS.keys()) + [CASH_NAME]
-
-        faber_ws = []
-        old_ws = []
-        gtaa_ws = []
-        kr_3asset_ws = []
-        for d in me_quant:
-            try:
-                faber_ws.append(calculate_faber_weights(d, all_data, mode='A', price_col=price_col))
-            except Exception:
-                pass
-            try:
-                old_ws.append(calculate_weights_at_date(d, all_data, price_col=price_col))
-            except Exception:
-                pass
-            try:
-                gtaa_ws.append(calculate_gtaa_weights(d, all_data, price_col=price_col))
-            except Exception:
-                pass
-            try:
-                if kr_3asset_data is not None:
-                    kr_3asset_ws.append(
-                        calculate_kr_stock_bond_cash_avg_momentum_weights(
-                            d, kr_3asset_data, cash_score=1.0, price_col=price_col
-                        )
-                    )
-            except Exception:
-                pass
-        faber_turn_avg, faber_turn_max, _ = estimate_turnover_from_weight_series(faber_ws, keys)
-        old_turn_avg, old_turn_max, _ = estimate_turnover_from_weight_series(old_ws, keys)
-        gtaa_turn_avg, gtaa_turn_max, _ = estimate_turnover_from_weight_series(gtaa_ws, keys)
-        kr_3asset_turn_avg, kr_3asset_turn_max, _ = estimate_turnover_from_weight_series(
-            kr_3asset_ws, [KR_STOCK_MIX_ASSET, KR_BOND_10Y_MIX_ASSET, CASH_NAME]
-        )
+        full_keys = list(ASSETS.keys()) + [CASH_NAME]
+        weight_builders = {
+            "Faber A ⭐": lambda d: calculate_faber_weights(d, all_data, mode='A', price_col=price_col),
+            "이전 전략(연속 모멘텀)": lambda d: calculate_weights_at_date(d, all_data, price_col=price_col),
+            "GTAA (10개월 SMA)": lambda d: calculate_gtaa_weights(d, all_data, price_col=price_col),
+            KR_3ASSET_STRATEGY_LABEL: (
+                lambda d: calculate_kr_stock_bond_cash_avg_momentum_weights(
+                    d, kr_3asset_data, cash_score=1.0, price_col=price_col
+                ) if kr_3asset_data is not None else None
+            ),
+            FABER_EX_BONDS_3_LABEL: (
+                lambda d: calculate_faber_weights_for_assets(
+                    d, faber_ex3_data, faber_ex3_assets, threshold=0.05, price_col=price_col
+                ) if faber_ex3_data is not None else None
+            ),
+            FABER_EX_BONDS_4_LABEL: (
+                lambda d: calculate_faber_weights_for_assets(
+                    d, faber_ex4_data, faber_ex4_assets, threshold=0.05, price_col=price_col
+                ) if faber_ex4_data is not None else None
+            ),
+            FABER_EX_BONDS_5_LABEL: (
+                lambda d: calculate_faber_weights_for_assets(
+                    d, faber_ex5_data, faber_ex5_assets, threshold=0.05, price_col=price_col
+                ) if faber_ex5_data is not None else None
+            ),
+        }
+        turnover_keys = {
+            "Faber A ⭐": full_keys,
+            "이전 전략(연속 모멘텀)": full_keys,
+            "GTAA (10개월 SMA)": full_keys,
+            KR_3ASSET_STRATEGY_LABEL: [KR_STOCK_MIX_ASSET, KR_BOND_10Y_MIX_ASSET, CASH_NAME],
+            FABER_EX_BONDS_3_LABEL: faber_ex3_assets + [CASH_NAME],
+            FABER_EX_BONDS_4_LABEL: faber_ex4_assets + [CASH_NAME],
+            FABER_EX_BONDS_5_LABEL: faber_ex5_assets + [CASH_NAME],
+        }
+        for name in quant_labels:
+            builder = weight_builders.get(name)
+            if builder is None:
+                continue
+            ws = []
+            for d in me_quant:
+                try:
+                    w = builder(d)
+                    if w is not None:
+                        ws.append(w)
+                except Exception:
+                    pass
+            avg_turn, max_turn, _ = estimate_turnover_from_weight_series(ws, turnover_keys.get(name, full_keys))
+            turnover_stats[name] = (avg_turn, max_turn)
 
         qf = quant_aligned.get("Faber A ⭐")
         qo = quant_aligned.get("이전 전략(연속 모멘텀)")
         win3, n3 = calculate_rolling_outperformance_rate(qf, qo, window_months=36)
         win5, n5 = calculate_rolling_outperformance_rate(qf, qo, window_months=60)
 
-    if m_faber is not None and m_old is not None and m_gtaa is not None and m_kr_3asset is not None:
-        comparison_rows = [
-            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}"), _fmt(m_gtaa["cagr"], "{:.2%}"), _fmt(m_kr_3asset["cagr"], "{:.2%}")),
-            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}"), _fmt(m_gtaa["mdd"], "{:.2%}"), _fmt(m_kr_3asset["mdd"], "{:.2%}")),
-            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}"), _fmt(m_gtaa["sharpe"], "{:.2f}"), _fmt(m_kr_3asset["sharpe"], "{:.2f}")),
-            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}"), _fmt(m_gtaa["sortino"], "{:.2f}"), _fmt(m_kr_3asset["sortino"], "{:.2f}")),
-            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}"), _fmt(m_gtaa["cagr_mdd"], "{:.2f}"), _fmt(m_kr_3asset["cagr_mdd"], "{:.2f}")),
-            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}"), _fmt(m_gtaa["ulcer"], "{:.2f}"), _fmt(m_kr_3asset["ulcer"], "{:.2f}")),
-            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}"), _fmt(m_gtaa["martin"], "{:.2f}"), _fmt(m_kr_3asset["martin"], "{:.2f}")),
-            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}"), _fmt(m_gtaa["cvar_5"], "{:.2%}"), _fmt(m_kr_3asset["cvar_5"], "{:.2%}")),
-            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}"), _fmt(m_gtaa["pos_month"], "{:.1%}"), _fmt(m_kr_3asset["pos_month"], "{:.1%}")),
-            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}"), _fmt(gtaa_turn_avg, "{:.1%}"), _fmt(kr_3asset_turn_avg, "{:.1%}")),
-            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}"), _fmt(gtaa_turn_max, "{:.1%}"), _fmt(kr_3asset_turn_max, "{:.1%}")),
+    if all(quant_metrics.get(name) is not None for name in quant_labels):
+        metric_specs = [
+            ("CAGR", "cagr", "{:.2%}"),
+            ("MDD (일별)", "mdd", "{:.2%}"),
+            ("Sharpe", "sharpe", "{:.2f}"),
+            ("Sortino", "sortino", "{:.2f}"),
+            ("CAGR / MDD", "cagr_mdd", "{:.2f}"),
+            ("Ulcer Index", "ulcer", "{:.2f}"),
+            ("Martin Ratio", "martin", "{:.2f}"),
+            ("CVaR 5% (월)", "cvar_5", "{:.2%}"),
+            ("양(+)월 비율", "pos_month", "{:.1%}"),
         ]
-        df_cmp = pd.DataFrame(
-            comparison_rows,
-            columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)", "GTAA (10개월 SMA)", KR_3ASSET_STRATEGY_LABEL]
+        comparison_rows = []
+        for row_label, key, fmt in metric_specs:
+            comparison_rows.append(
+                tuple([row_label] + [_fmt(quant_metrics[name].get(key), fmt) for name in quant_labels])
+            )
+        comparison_rows.append(
+            tuple(["평균 월회전율(추정)"] + [_fmt(turnover_stats[name][0], "{:.1%}") for name in quant_labels])
         )
+        comparison_rows.append(
+            tuple(["최대 월회전율(추정)"] + [_fmt(turnover_stats[name][1], "{:.1%}") for name in quant_labels])
+        )
+        df_cmp = pd.DataFrame(comparison_rows, columns=["지표"] + quant_labels)
         st.dataframe(df_cmp, use_container_width=True, hide_index=True)
         if win3 is not None or win5 is not None:
             rel_rows = [{
