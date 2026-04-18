@@ -2292,6 +2292,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     # 기존 연속 모멘텀 (차트 비교 참고용)
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
         bt_start_date, current_date, IC, all_data, price_col=price_col)
+    # GTAA (정량 비교/GTAA 전용 섹션 공용)
+    gtaa_nav = simulate_gtaa_strategy(
+        bt_start_date, current_date, IC, all_data, price_col=price_col
+    )
 
     # 동일비중 B&H
     static_nav = simulate_static_benchmark(bt_start_date, current_date, IC, all_data, price_col=price_col)
@@ -2351,7 +2355,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
-    st.caption("✅ 기준 확인: Faber A/이전 전략/정적 균등 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다.")
+    st.caption("✅ 기준 확인: Faber A/이전 전략/GTAA 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다.")
 
     def _strategy_metrics(nav, ic):
         """nav DataFrame에서 CAGR/MDD/Sharpe/Sortino를 딕셔너리로 반환."""
@@ -2376,6 +2380,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     quant_strategies = {
         "Faber A ⭐": nav_df,
         "이전 전략(연속 모멘텀)": old_nav,
+        "GTAA (10개월 SMA)": gtaa_nav,
     }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
         quant_strategies, min_obs_days=252
@@ -2387,12 +2392,13 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             f"({quant_meta['common_obs']}거래일)"
         )
     else:
-        st.warning("⚠️ Faber A와 이전 전략의 공통 거래일이 없어 공정 비교가 불가합니다.")
+        st.warning("⚠️ Faber A/이전 전략/GTAA 간 공통 거래일이 없어 공정 비교가 불가합니다.")
 
     m_faber = _strategy_metrics(quant_aligned.get("Faber A ⭐"), IC)
     m_old = _strategy_metrics(quant_aligned.get("이전 전략(연속 모멘텀)"), IC)
+    m_gtaa = _strategy_metrics(quant_aligned.get("GTAA (10개월 SMA)"), IC)
 
-    faber_turn_avg = faber_turn_max = old_turn_avg = old_turn_max = None
+    faber_turn_avg = faber_turn_max = old_turn_avg = old_turn_max = gtaa_turn_avg = gtaa_turn_max = None
     win3 = n3 = win5 = n5 = None
     if quant_meta["common_start"] is not None and quant_meta["common_end"] is not None:
         td_quant = build_trading_calendar(all_data, quant_meta["common_start"], quant_meta["common_end"])
@@ -2401,6 +2407,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
         faber_ws = []
         old_ws = []
+        gtaa_ws = []
         for d in me_quant:
             try:
                 faber_ws.append(calculate_faber_weights(d, all_data, mode='A', price_col=price_col))
@@ -2410,29 +2417,34 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 old_ws.append(calculate_weights_at_date(d, all_data, price_col=price_col))
             except Exception:
                 pass
+            try:
+                gtaa_ws.append(calculate_gtaa_weights(d, all_data, price_col=price_col))
+            except Exception:
+                pass
         faber_turn_avg, faber_turn_max, _ = estimate_turnover_from_weight_series(faber_ws, keys)
         old_turn_avg, old_turn_max, _ = estimate_turnover_from_weight_series(old_ws, keys)
+        gtaa_turn_avg, gtaa_turn_max, _ = estimate_turnover_from_weight_series(gtaa_ws, keys)
 
         qf = quant_aligned.get("Faber A ⭐")
         qo = quant_aligned.get("이전 전략(연속 모멘텀)")
         win3, n3 = calculate_rolling_outperformance_rate(qf, qo, window_months=36)
         win5, n5 = calculate_rolling_outperformance_rate(qf, qo, window_months=60)
 
-    if m_faber is not None and m_old is not None:
+    if m_faber is not None and m_old is not None and m_gtaa is not None:
         comparison_rows = [
-            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}")),
-            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}")),
-            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}")),
-            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}")),
-            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}")),
-            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}")),
-            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}")),
-            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}")),
-            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}")),
-            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}")),
-            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}")),
+            ("CAGR",        _fmt(m_faber["cagr"], "{:.2%}"), _fmt(m_old["cagr"], "{:.2%}"), _fmt(m_gtaa["cagr"], "{:.2%}")),
+            ("MDD (일별)",  _fmt(m_faber["mdd"], "{:.2%}"), _fmt(m_old["mdd"], "{:.2%}"), _fmt(m_gtaa["mdd"], "{:.2%}")),
+            ("Sharpe",      _fmt(m_faber["sharpe"], "{:.2f}"), _fmt(m_old["sharpe"], "{:.2f}"), _fmt(m_gtaa["sharpe"], "{:.2f}")),
+            ("Sortino",     _fmt(m_faber["sortino"], "{:.2f}"), _fmt(m_old["sortino"], "{:.2f}"), _fmt(m_gtaa["sortino"], "{:.2f}")),
+            ("CAGR / MDD",  _fmt(m_faber["cagr_mdd"], "{:.2f}"), _fmt(m_old["cagr_mdd"], "{:.2f}"), _fmt(m_gtaa["cagr_mdd"], "{:.2f}")),
+            ("Ulcer Index", _fmt(m_faber["ulcer"], "{:.2f}"), _fmt(m_old["ulcer"], "{:.2f}"), _fmt(m_gtaa["ulcer"], "{:.2f}")),
+            ("Martin Ratio", _fmt(m_faber["martin"], "{:.2f}"), _fmt(m_old["martin"], "{:.2f}"), _fmt(m_gtaa["martin"], "{:.2f}")),
+            ("CVaR 5% (월)", _fmt(m_faber["cvar_5"], "{:.2%}"), _fmt(m_old["cvar_5"], "{:.2%}"), _fmt(m_gtaa["cvar_5"], "{:.2%}")),
+            ("양(+)월 비율", _fmt(m_faber["pos_month"], "{:.1%}"), _fmt(m_old["pos_month"], "{:.1%}"), _fmt(m_gtaa["pos_month"], "{:.1%}")),
+            ("평균 월회전율(추정)", _fmt(faber_turn_avg, "{:.1%}"), _fmt(old_turn_avg, "{:.1%}"), _fmt(gtaa_turn_avg, "{:.1%}")),
+            ("최대 월회전율(추정)", _fmt(faber_turn_max, "{:.1%}"), _fmt(old_turn_max, "{:.1%}"), _fmt(gtaa_turn_max, "{:.1%}")),
         ]
-        df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)"])
+        df_cmp = pd.DataFrame(comparison_rows, columns=["지표", "Faber A ⭐", "이전 전략(연속 모멘텀)", "GTAA (10개월 SMA)"])
         st.dataframe(df_cmp, use_container_width=True, hide_index=True)
         if win3 is not None or win5 is not None:
             rel_rows = [{
@@ -2451,117 +2463,116 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.caption("⚠️ 공정 비교 주의/제외 전략")
         st.dataframe(quant_warn_df, use_container_width=True, hide_index=True)
 
-    # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
-        # ?? Faber A/B/C/D Overlay Comparison (non-invasive) ?????????????????????
-    st.markdown("---")
-    st.subheader("Faber Defensive Overlay: A vs B/C/D/E/F/G")
-    st.caption(
-        "Base Faber A is kept intact, and B/C/D/E/F/G overlays are compared on the same rules."
-    )
-    st.caption(
-        "A: OFF->Cash | B: OFF->IEF(KRW, always) | C: OFF->IEF(KRW, IEF gate) | "
-        "D: OFF->SHV(KRW, SHV gate) | E: OFF->IEF(USD, always) | "
-        "F: OFF->KTB10Y(KRW, always) | G: A90% + Mean-Reversion Satellite10%"
-    )
-
-    ief_buffer_df = _fetch_slot_proxy(
-        {'proxy': 'IEF', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
-        data_start, current_date
-    )
-    shv_buffer_df = _fetch_slot_proxy(
-        {'proxy': 'SHV', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
-        data_start, current_date
-    )
-    ief_usd_buffer_df = _fetch_slot_proxy(
-        {'proxy': 'IEF', 'proxy_type': 'us_etf'},
-        data_start, current_date
-    )
-    kr10_buffer_df = _fetch_slot_proxy(
-        {'proxy': '148070', 'proxy_type': 'kr_etf'},
-        data_start, current_date
-    )
-
-    mode_b_nav = mode_c_nav = mode_d_nav = mode_e_nav = mode_f_nav = mode_g_nav = None
-    if ief_buffer_df is not None and not ief_buffer_df.empty:
-        mode_b_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='B', buffer_df=ief_buffer_df, price_col=price_col
-        )
-        mode_c_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='C', buffer_df=ief_buffer_df, price_col=price_col
-        )
-    if shv_buffer_df is not None and not shv_buffer_df.empty:
-        mode_d_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='D', buffer_df=shv_buffer_df, price_col=price_col
-        )
-    if ief_usd_buffer_df is not None and not ief_usd_buffer_df.empty:
-        mode_e_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='E', buffer_df=ief_usd_buffer_df, price_col=price_col
-        )
-    if kr10_buffer_df is not None and not kr10_buffer_df.empty:
-        mode_f_nav = simulate_faber_strategy(
-            bt_start_date, current_date, IC, all_data,
-            mode='F', buffer_df=kr10_buffer_df, price_col=price_col
-        )
-    mode_g_nav = simulate_faber_mode_g(
-        bt_start_date, current_date, IC, all_data, price_col=price_col,
-        core_weight=0.90, satellite_weight=0.10
-    )
-
-    overlay_map = {"A Base (OFF->Cash)": nav_df}
-    if mode_b_nav is not None:
-        overlay_map["B OFF->IEF(KRW) (always)"] = mode_b_nav
-    if mode_c_nav is not None:
-        overlay_map["C OFF->IEF(KRW) (IEF gate)"] = mode_c_nav
-    if mode_d_nav is not None:
-        overlay_map["D OFF->SHV(KRW) (SHV gate)"] = mode_d_nav
-    if mode_e_nav is not None:
-        overlay_map["E OFF->IEF(USD) (always)"] = mode_e_nav
-    if mode_f_nav is not None:
-        overlay_map["F OFF->KTB10Y(KRW) (always)"] = mode_f_nav
-    if mode_g_nav is not None:
-        overlay_map["G A90 + MR10 satellite"] = mode_g_nav
-
-    if len(overlay_map) >= 2:
-        ov_aligned, ov_meta, ov_status = align_strategies_to_common_dates(
-            overlay_map, min_obs_days=252
-        )
-        if ov_meta["common_obs"] > 0:
+    def _render_overlay_section():
+        st.markdown("---")
+        with st.expander("Faber Defensive Overlay: A vs B/C/D/E/F/G", expanded=False):
+            st.caption("필요할 때만 펼쳐 확인하세요. 표는 내부 스크롤(고정 높이)로 표시됩니다.")
             st.caption(
-                f"?? Common period: {ov_meta['common_start'].strftime('%Y-%m-%d')} ~ "
-                f"{ov_meta['common_end'].strftime('%Y-%m-%d')} ({ov_meta['common_obs']} trading days)"
+                "A: OFF->Cash | B: OFF->IEF(KRW, always) | C: OFF->IEF(KRW, IEF gate) | "
+                "D: OFF->SHV(KRW, SHV gate) | E: OFF->IEF(USD, always) | "
+                "F: OFF->KTB10Y(KRW, always) | G: A90% + Mean-Reversion Satellite10%"
             )
 
-            ov_cmp = build_comparison_table(ov_aligned, IC)
-            if ov_cmp is not None:
-                st.dataframe(ov_cmp, use_container_width=True)
+            ief_buffer_df = _fetch_slot_proxy(
+                {'proxy': 'IEF', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
+                data_start, current_date
+            )
+            shv_buffer_df = _fetch_slot_proxy(
+                {'proxy': 'SHV', 'proxy_type': 'us_etf_fx', 'fx': 'USD/KRW'},
+                data_start, current_date
+            )
+            ief_usd_buffer_df = _fetch_slot_proxy(
+                {'proxy': 'IEF', 'proxy_type': 'us_etf'},
+                data_start, current_date
+            )
+            kr10_buffer_df = _fetch_slot_proxy(
+                {'proxy': '148070', 'proxy_type': 'kr_etf'},
+                data_start, current_date
+            )
 
-            ov_extra_rows = []
-            for name, nav_cut in ov_aligned.items():
-                m = _strategy_metrics(nav_cut, IC)
-                if m is None:
-                    continue
-                ov_extra_rows.append({
-                    "Strategy": name,
-                    "Ulcer": _fmt(m["ulcer"], "{:.2f}"),
-                    "Martin": _fmt(m["martin"], "{:.2f}"),
-                    "CVaR 5% (M)": _fmt(m["cvar_5"], "{:.2%}"),
-                    "Positive Month %": _fmt(m["pos_month"], "{:.1%}"),
-                })
-            if ov_extra_rows:
-                st.caption("Additional risk metrics (same common period)")
-                st.dataframe(pd.DataFrame(ov_extra_rows), use_container_width=True, hide_index=True)
+            mode_b_nav = mode_c_nav = mode_d_nav = mode_e_nav = mode_f_nav = mode_g_nav = None
+            if ief_buffer_df is not None and not ief_buffer_df.empty:
+                mode_b_nav = simulate_faber_strategy(
+                    bt_start_date, current_date, IC, all_data,
+                    mode='B', buffer_df=ief_buffer_df, price_col=price_col
+                )
+                mode_c_nav = simulate_faber_strategy(
+                    bt_start_date, current_date, IC, all_data,
+                    mode='C', buffer_df=ief_buffer_df, price_col=price_col
+                )
+            if shv_buffer_df is not None and not shv_buffer_df.empty:
+                mode_d_nav = simulate_faber_strategy(
+                    bt_start_date, current_date, IC, all_data,
+                    mode='D', buffer_df=shv_buffer_df, price_col=price_col
+                )
+            if ief_usd_buffer_df is not None and not ief_usd_buffer_df.empty:
+                mode_e_nav = simulate_faber_strategy(
+                    bt_start_date, current_date, IC, all_data,
+                    mode='E', buffer_df=ief_usd_buffer_df, price_col=price_col
+                )
+            if kr10_buffer_df is not None and not kr10_buffer_df.empty:
+                mode_f_nav = simulate_faber_strategy(
+                    bt_start_date, current_date, IC, all_data,
+                    mode='F', buffer_df=kr10_buffer_df, price_col=price_col
+                )
+            mode_g_nav = simulate_faber_mode_g(
+                bt_start_date, current_date, IC, all_data, price_col=price_col,
+                core_weight=0.90, satellite_weight=0.10
+            )
 
-            if ov_status is not None and not ov_status.empty:
-                st.caption("Overlay status (common-period eligibility)")
-                st.dataframe(ov_status, use_container_width=True, hide_index=True)
-        else:
-            st.warning("Overlay comparison is unavailable because there are no common dates.")
-    else:
-        st.warning("Overlay comparison is unavailable because overlay buffer data could not be loaded.")
+            overlay_map = {"A Base (OFF->Cash)": nav_df}
+            if mode_b_nav is not None:
+                overlay_map["B OFF->IEF(KRW) (always)"] = mode_b_nav
+            if mode_c_nav is not None:
+                overlay_map["C OFF->IEF(KRW) (IEF gate)"] = mode_c_nav
+            if mode_d_nav is not None:
+                overlay_map["D OFF->SHV(KRW) (SHV gate)"] = mode_d_nav
+            if mode_e_nav is not None:
+                overlay_map["E OFF->IEF(USD) (always)"] = mode_e_nav
+            if mode_f_nav is not None:
+                overlay_map["F OFF->KTB10Y(KRW) (always)"] = mode_f_nav
+            if mode_g_nav is not None:
+                overlay_map["G A90 + MR10 satellite"] = mode_g_nav
+
+            if len(overlay_map) >= 2:
+                ov_aligned, ov_meta, ov_status = align_strategies_to_common_dates(
+                    overlay_map, min_obs_days=252
+                )
+                if ov_meta["common_obs"] > 0:
+                    st.caption(
+                        f"📅 공통 비교 기간: {ov_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+                        f"{ov_meta['common_end'].strftime('%Y-%m-%d')} ({ov_meta['common_obs']}거래일)"
+                    )
+
+                    ov_cmp = build_comparison_table(ov_aligned, IC)
+                    if ov_cmp is not None:
+                        st.dataframe(ov_cmp, use_container_width=True, height=320)
+
+                    ov_extra_rows = []
+                    for name, nav_cut in ov_aligned.items():
+                        m = _strategy_metrics(nav_cut, IC)
+                        if m is None:
+                            continue
+                        ov_extra_rows.append({
+                            "Strategy": name,
+                            "Ulcer": _fmt(m["ulcer"], "{:.2f}"),
+                            "Martin": _fmt(m["martin"], "{:.2f}"),
+                            "CVaR 5% (M)": _fmt(m["cvar_5"], "{:.2%}"),
+                            "Positive Month %": _fmt(m["pos_month"], "{:.1%}"),
+                        })
+                    if ov_extra_rows:
+                        st.caption("Additional risk metrics (same common period)")
+                        st.dataframe(pd.DataFrame(ov_extra_rows), use_container_width=True, hide_index=True, height=260)
+
+                    if ov_status is not None and not ov_status.empty:
+                        st.caption("Overlay status (common-period eligibility)")
+                        st.dataframe(ov_status, use_container_width=True, hide_index=True, height=260)
+                else:
+                    st.warning("Overlay comparison is unavailable because there are no common dates.")
+            else:
+                st.warning("Overlay comparison is unavailable because overlay buffer data could not be loaded.")
+
+    # ── 정적 자산배분(20% 고정) vs Faber A 비교 ─────────────
 
     st.markdown("---")
     st.subheader("📊 정적 자산배분 (20% 균등) vs Faber A")
@@ -3399,8 +3410,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             "| 급락장 방어 | 빠른 퇴출 | 늦은 퇴출 |\n"
         )
 
-    with st.spinner("🆚 GTAA 시뮬레이션 중..."):
-        gtaa_nav = simulate_gtaa_strategy(bt_start_date, current_date, IC, all_data, price_col=price_col)
+    if gtaa_nav is None:
+        with st.spinner("🆚 GTAA 시뮬레이션 중..."):
+            gtaa_nav = simulate_gtaa_strategy(bt_start_date, current_date, IC, all_data, price_col=price_col)
 
     if gtaa_nav is not None and nav_df is not None:
         # 비교 테이블
@@ -3681,6 +3693,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                                  "\"결국 회복한다\"는 전제가 깨지면 이렇게 됩니다.")
         except Exception as e:
             st.warning(f"백테스트 오류: {e}")
+
+    # ── 하단 배치: 방어 오버레이 비교(접기 + 내부 스크롤) ─────────────
+    _render_overlay_section()
 
 
 def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date):
