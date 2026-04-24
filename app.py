@@ -2151,6 +2151,20 @@ def build_benchmark_etf_returns(benchmark_df, strategy_nav_df, initial_capital):
 # ==============================
 # 7. 성과 지표
 # ==============================
+def calculate_cumulative_principal(initial_capital, cash_flows, evaluation_date):
+    """평가 기준일에 이미 반영된 외부 입출금을 더한 누적 원금."""
+    principal = float(initial_capital)
+    if evaluation_date is None:
+        return principal
+
+    evaluation_ts = pd.Timestamp(evaluation_date).normalize()
+    for date_str, amount in (cash_flows or {}).items():
+        cash_flow_ts = pd.Timestamp(date_str).normalize()
+        if cash_flow_ts <= evaluation_ts:
+            principal += float(amount)
+    return principal
+
+
 def build_personal_account_curve(strategy_nav, initial_capital, cash_flows):
     """
     strategy_nav: Faber A 전략 자체의 기준가/NAV Series
@@ -2839,6 +2853,14 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             cash_flows=PERSONAL_CASH_FLOWS,
         )
         latest_personal = personal_df.iloc[-1]
+        latest_principal = calculate_cumulative_principal(
+            DEFAULT_INITIAL_CAPITAL,
+            PERSONAL_CASH_FLOWS,
+            latest_personal.name,
+        )
+        latest_account_value = float(latest_personal["account_value"])
+        latest_profit = latest_account_value - latest_principal
+        latest_return_on_principal = latest_account_value / latest_principal - 1 if latest_principal > 0 else 0.0
 
         st.subheader("내 실제 계좌 기준")
         st.caption(
@@ -2846,10 +2868,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
         )
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("누적 원금", f"{latest_personal['principal']:,.0f}원")
-        col2.metric("실제 평가액", f"{latest_personal['account_value']:,.0f}원")
-        col3.metric("실제 손익", f"{latest_personal['profit']:,.0f}원")
-        col4.metric("원금 대비 수익률", f"{latest_personal['return_on_principal']:.2%}")
+        col1.metric("누적 원금", f"{latest_principal:,.0f}원")
+        col2.metric("실제 평가액", f"{latest_account_value:,.0f}원")
+        col3.metric("실제 손익", f"{latest_profit:,.0f}원")
+        col4.metric("원금 대비 수익률", f"{latest_return_on_principal:.2%}")
 
     st.markdown("---")
     st.subheader("📉 Faber A 성과 차트")
@@ -4324,9 +4346,16 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.markdown("#### 💼 나의 투자 성과")
     personal_nav_df = simulate_faber_strategy(inv_start_date, current_date, init_capital, all_data,
         mode='A', buffer_df=None, price_col=price_col)
+    performance_base_date = personal_nav_df.index[-1] if personal_nav_df is not None and len(personal_nav_df) > 0 else current_date
+    cumulative_principal = calculate_cumulative_principal(
+        init_capital,
+        PERSONAL_CASH_FLOWS,
+        performance_base_date,
+    )
+    performance_base_date_str = pd.Timestamp(performance_base_date).strftime('%Y-%m-%d')
     realized_return_pct = (hist_profit / init_capital) * 100 if init_capital > 0 else 0.0
-    acc_return = (current_total_assets - init_capital) / init_capital if init_capital > 0 else 0.0
-    delta_won = current_total_assets - init_capital
+    asset_return = (current_total_assets / cumulative_principal - 1) if cumulative_principal > 0 else 0.0
+    delta_won = current_total_assets - cumulative_principal
     p_mdd_daily, p_mdd_monthly, p_peak, p_valley = None, None, None, None
     if personal_nav_df is not None and len(personal_nav_df) > 0:
         _, _, p_mdd_daily, _ = calculate_performance_metrics(personal_nav_df, init_capital)
@@ -4335,8 +4364,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("누적 실현수익", f"{hist_profit:,.0f}원", delta=f"{realized_return_pct:.2f}%")
-    c2.metric("현재 내 돈", f"{current_total_assets:,.0f}원", delta=f"{delta_won:,.0f}원")
-    c3.metric("누적 수익률", f"{acc_return*100:.2f}%")
+    c2.metric("현재 운용자산", f"{current_total_assets:,.0f}원", delta=f"{delta_won:,.0f}원")
+    c3.metric("운용자산 기준 수익률", f"{asset_return*100:.2f}%")
     c4.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
     c5.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
     if p_peak and p_valley:
@@ -4359,12 +4388,16 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             ref_label = "역대MDD" if bt_mdd_historical and abs(bt_mdd_historical) > 0.001 else "투자기간MDD"
             if ref_mdd and abs(ref_mdd) > 0.001:
                 st.warning(f"📊 **현재 고점 대비 하락률: {current_dd*100:.2f}%** | "
-                           f"고점: {peak_date_str} → 현재: {current_date.strftime('%Y-%m-%d')} | "
+                           f"고점: {peak_date_str} → 현재: {performance_base_date_str} | "
                            f"{ref_label}({ref_mdd*100:.2f}%) 대비 {abs(current_dd/ref_mdd)*100:.0f}% 수준")
             else:
                 st.warning(f"📊 **현재 고점 대비 하락률: {current_dd*100:.2f}%** | "
-                           f"고점: {peak_date_str} → 현재: {current_date.strftime('%Y-%m-%d')}")
-    st.caption(f"📅 투자 시작일: {inv_start_date.strftime('%Y-%m-%d')} | 초기 투자금: {init_capital:,.0f}원")
+                           f"고점: {peak_date_str} → 현재: {performance_base_date_str}")
+    st.caption(
+        f"📅 투자 시작일: {inv_start_date.strftime('%Y-%m-%d')} | "
+        f"평가 기준일: {performance_base_date_str} | "
+        f"누적 원금: {cumulative_principal:,.0f}원"
+    )
 
     if personal_nav_df is not None and not personal_nav_df.empty:
         personal_df = build_personal_account_curve(
@@ -4373,6 +4406,14 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             cash_flows=PERSONAL_CASH_FLOWS,
         )
         latest_personal = personal_df.iloc[-1]
+        latest_principal = calculate_cumulative_principal(
+            init_capital,
+            PERSONAL_CASH_FLOWS,
+            latest_personal.name,
+        )
+        latest_account_value = float(latest_personal["account_value"])
+        latest_profit = latest_account_value - latest_principal
+        latest_return_on_principal = latest_account_value / latest_principal - 1 if latest_principal > 0 else 0.0
 
         st.subheader("내 실제 계좌 기준")
         st.caption(
@@ -4380,10 +4421,10 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
         )
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("누적 원금", f"{latest_personal['principal']:,.0f}원")
-        col2.metric("실제 평가액", f"{latest_personal['account_value']:,.0f}원")
-        col3.metric("실제 손익", f"{latest_personal['profit']:,.0f}원")
-        col4.metric("원금 대비 수익률", f"{latest_personal['return_on_principal']:.2%}")
+        col1.metric("누적 원금", f"{latest_principal:,.0f}원")
+        col2.metric("실제 평가액", f"{latest_account_value:,.0f}원")
+        col3.metric("실제 손익", f"{latest_profit:,.0f}원")
+        col4.metric("원금 대비 수익률", f"{latest_return_on_principal:.2%}")
 
     # ── 이번 달 자산별 성과 ──
     st.markdown("---")
