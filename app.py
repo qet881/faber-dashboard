@@ -2865,7 +2865,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.subheader("내 실제 계좌 기준")
         st.caption(
             "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
-            "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
+            "개인 성과 판단은 원금 대비 수익률을 기준으로 보며, 전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
         )
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("누적 원금", f"{latest_principal:,.0f}원")
@@ -4299,6 +4299,10 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             st.session_state[key] = qp_val if qp_val is not None else default
 
     st.sidebar.markdown("### 💰 계좌 잔고 입력")
+    st.sidebar.warning(
+        "사이드바 계좌 잔고 변경분은 입출금인지 수익인지 자동 구분할 수 없습니다. "
+        "외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
+    )
     if st.sidebar.button("🔄 잔고 기본값으로 초기화"):
         for k, v in [("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL), ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
                       ("bal_isa_a", DEFAULT_ISA_A_BAL), ("bal_isa_b", DEFAULT_ISA_B_BAL)]:
@@ -4354,20 +4358,25 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     )
     performance_base_date_str = pd.Timestamp(performance_base_date).strftime('%Y-%m-%d')
     realized_return_pct = (hist_profit / init_capital) * 100 if init_capital > 0 else 0.0
-    asset_return = (current_total_assets / cumulative_principal - 1) if cumulative_principal > 0 else 0.0
-    delta_won = current_total_assets - cumulative_principal
+    recorded_principal_gap = current_total_assets - cumulative_principal
     p_mdd_daily, p_mdd_monthly, p_peak, p_valley = None, None, None, None
     if personal_nav_df is not None and len(personal_nav_df) > 0:
         _, _, p_mdd_daily, _ = calculate_performance_metrics(personal_nav_df, init_capital)
         p_mdd_monthly = calculate_monthly_mdd(personal_nav_df)
         p_peak, p_valley, _ = find_mdd_period(personal_nav_df)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("누적 실현수익", f"{hist_profit:,.0f}원", delta=f"{realized_return_pct:.2f}%")
-    c2.metric("현재 운용자산", f"{current_total_assets:,.0f}원", delta=f"{delta_won:,.0f}원")
-    c3.metric("운용자산 기준 수익률", f"{asset_return*100:.2f}%")
-    c4.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
-    c5.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
+    c2.metric("현재 운용자산", f"{current_total_assets:,.0f}원")
+    c3.metric("누적 원금", f"{cumulative_principal:,.0f}원")
+    c4.metric("기록 원금 대비 차이", f"{recorded_principal_gap:,.0f}원")
+    c5.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
+    c6.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
+    st.warning(
+        "입출금이 PERSONAL_CASH_FLOWS에 기록되지 않으면 현재 운용자산과 누적 원금의 차이가 수익처럼 보일 수 있습니다. "
+        "사이드바 계좌 잔고 변경분은 자동으로 입출금과 투자 성과를 구분할 수 없으므로, 외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
+    )
+    st.info("실제 성과 판단은 아래 '내 실제 계좌 기준' 섹션의 원금 대비 수익률을 기준으로 확인하세요.")
     if p_peak and p_valley:
         st.info(f"📉 **최대 낙폭 (일별)**: {p_peak.strftime('%Y-%m-%d')}(고점) → {p_valley.strftime('%Y-%m-%d')}(저점)")
     p_m_peak, p_m_valley, _ = find_monthly_mdd_period(personal_nav_df) if personal_nav_df is not None and len(personal_nav_df) > 0 else (None, None, None)
@@ -4418,7 +4427,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         st.subheader("내 실제 계좌 기준")
         st.caption(
             "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
-            "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
+            "개인 성과 판단은 원금 대비 수익률을 기준으로 보며, 전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
         )
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("누적 원금", f"{latest_principal:,.0f}원")
