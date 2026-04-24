@@ -361,6 +361,9 @@ st.set_page_config(page_title="통합 투자 솔루션 (분석 & 실행)", page_
 # ==============================
 DEFAULT_INVESTMENT_START_DATE = datetime(2026, 3, 31)
 DEFAULT_INITIAL_CAPITAL = 249008318  # 3/31 종가 확정 총자산
+PERSONAL_CASH_FLOWS = {
+    "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입. 실제 월중 입금, 전략 편입은 월말 리밸런싱일 기준.
+}
 DEFAULT_HISTORICAL_REALIZED_PROFIT = 67571303  # (249,008,318 - 226,356,552) + 44,919,537
 DEFAULT_BACKTEST_START_DATE = datetime(2000, 1, 1)
 
@@ -2148,6 +2151,52 @@ def build_benchmark_etf_returns(benchmark_df, strategy_nav_df, initial_capital):
 # ==============================
 # 7. 성과 지표
 # ==============================
+def build_personal_account_curve(strategy_nav, initial_capital, cash_flows):
+    """
+    strategy_nav: Faber A 전략 자체의 기준가/NAV Series
+    initial_capital: 최초 투입 원금
+    cash_flows: {"YYYY-MM-DD": amount} 형태. 입금은 +, 출금은 -
+    """
+    nav = pd.Series(strategy_nav).dropna().copy()
+    nav = nav / nav.iloc[0]
+
+    units = pd.Series(index=nav.index, dtype=float)
+    principal = pd.Series(index=nav.index, dtype=float)
+    account_value = pd.Series(index=nav.index, dtype=float)
+    cash_flow_series = pd.Series(0.0, index=nav.index)
+
+    for date_str, amount in cash_flows.items():
+        date = pd.Timestamp(date_str)
+        valid_dates = nav.index[nav.index >= date]
+        if len(valid_dates) > 0:
+            cash_flow_series.loc[valid_dates[0]] += float(amount)
+
+    units.iloc[0] = initial_capital / nav.iloc[0]
+    principal.iloc[0] = initial_capital
+    account_value.iloc[0] = units.iloc[0] * nav.iloc[0]
+
+    for i in range(1, len(nav)):
+        units.iloc[i] = units.iloc[i - 1]
+        principal.iloc[i] = principal.iloc[i - 1]
+
+        cf = cash_flow_series.iloc[i]
+        if cf != 0:
+            units.iloc[i] += cf / nav.iloc[i]
+            principal.iloc[i] += cf
+
+        account_value.iloc[i] = units.iloc[i] * nav.iloc[i]
+
+    return pd.DataFrame({
+        "strategy_nav": nav,
+        "cash_flow": cash_flow_series,
+        "units": units,
+        "principal": principal,
+        "account_value": account_value,
+        "profit": account_value - principal,
+        "return_on_principal": account_value / principal - 1,
+    })
+
+
 def calculate_performance_metrics(daily_nav_df, initial_capital):
     if daily_nav_df is None or len(daily_nav_df) == 0: return None, None, None, None
     current_value = float(daily_nav_df["nav"].iloc[-1])
@@ -2778,6 +2827,29 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.info(f"📉 **MDD (일별)**: {s_peak.strftime('%Y-%m-%d')}(고점) → {s_valley.strftime('%Y-%m-%d')}(저점) | {s_mdd*100:.2f}%")
     if s_m_peak and s_m_valley:
         st.info(f"📉 **MDD (월별)**: {s_m_peak.strftime('%Y-%m-%d')}(고점) → {s_m_valley.strftime('%Y-%m-%d')}(저점) | {s_m_mdd_val*100:.2f}%")
+
+    personal_strategy_nav = simulate_faber_strategy(
+        DEFAULT_INVESTMENT_START_DATE, current_date, DEFAULT_INITIAL_CAPITAL, all_data,
+        mode='A', buffer_df=None, price_col=price_col
+    )
+    if personal_strategy_nav is not None and not personal_strategy_nav.empty:
+        personal_df = build_personal_account_curve(
+            strategy_nav=personal_strategy_nav["nav"],
+            initial_capital=DEFAULT_INITIAL_CAPITAL,
+            cash_flows=PERSONAL_CASH_FLOWS,
+        )
+        latest_personal = personal_df.iloc[-1]
+
+        st.subheader("내 실제 계좌 기준")
+        st.caption(
+            "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
+            "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
+        )
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("누적 원금", f"{latest_personal['principal']:,.0f}원")
+        col2.metric("실제 평가액", f"{latest_personal['account_value']:,.0f}원")
+        col3.metric("실제 손익", f"{latest_personal['profit']:,.0f}원")
+        col4.metric("원금 대비 수익률", f"{latest_personal['return_on_principal']:.2%}")
 
     st.markdown("---")
     st.subheader("📉 Faber A 성과 차트")
@@ -4293,6 +4365,25 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 st.warning(f"📊 **현재 고점 대비 하락률: {current_dd*100:.2f}%** | "
                            f"고점: {peak_date_str} → 현재: {current_date.strftime('%Y-%m-%d')}")
     st.caption(f"📅 투자 시작일: {inv_start_date.strftime('%Y-%m-%d')} | 초기 투자금: {init_capital:,.0f}원")
+
+    if personal_nav_df is not None and not personal_nav_df.empty:
+        personal_df = build_personal_account_curve(
+            strategy_nav=personal_nav_df["nav"],
+            initial_capital=init_capital,
+            cash_flows=PERSONAL_CASH_FLOWS,
+        )
+        latest_personal = personal_df.iloc[-1]
+
+        st.subheader("내 실제 계좌 기준")
+        st.caption(
+            "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
+            "전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
+        )
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("누적 원금", f"{latest_personal['principal']:,.0f}원")
+        col2.metric("실제 평가액", f"{latest_personal['account_value']:,.0f}원")
+        col3.metric("실제 손익", f"{latest_personal['profit']:,.0f}원")
+        col4.metric("원금 대비 수익률", f"{latest_personal['return_on_principal']:.2%}")
 
     # ── 이번 달 자산별 성과 ──
     st.markdown("---")
