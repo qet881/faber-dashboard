@@ -1,6 +1,3 @@
-# Streamlit secrets — 절대 커밋 금지 (개인 재무 정보 포함)
-.streamlit/secrets.toml
-
 # Python
 __pycache__/
 *.py[cod]

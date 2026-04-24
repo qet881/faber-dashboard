@@ -359,47 +359,24 @@ st.set_page_config(page_title="통합 투자 솔루션 (분석 & 실행)", page_
 # ==============================
 # 1) 기본 설정값
 # ==============================
-
-# ── secrets 헬퍼 ─────────────────────────────────────────
-def _cfg_int(key: str, default: int) -> int:
-    """st.secrets에서 정수값을 읽고, 없으면 fallback 기본값을 반환한다."""
-    try:
-        return int(st.secrets[key])
-    except (KeyError, AttributeError):
-        return default
-
-def _cfg_date(key: str, default: datetime) -> datetime:
-    """st.secrets에서 'YYYY-MM-DD' 문자열을 읽어 datetime으로 변환한다."""
-    try:
-        return datetime.strptime(str(st.secrets[key]), "%Y-%m-%d")
-    except (KeyError, AttributeError, ValueError):
-        return default
-
-def _cfg_cash_flows(section: str) -> dict:
-    """st.secrets의 TOML 섹션에서 현금흐름 dict {date_str: amount} 를 읽는다."""
-    try:
-        raw = st.secrets[section]
-        return {k: int(v) for k, v in raw.items()}
-    except (KeyError, AttributeError):
-        return {}
-# ─────────────────────────────────────────────────────────
-
-DEFAULT_INVESTMENT_START_DATE = _cfg_date("investment_start_date", datetime(2026, 3, 31))
-DEFAULT_INITIAL_CAPITAL       = _cfg_int("initial_capital",        249_008_318)  # 3/31 종가 확정 총자산
-DEFAULT_HISTORICAL_REALIZED_PROFIT = _cfg_int("historical_realized_profit", 67_571_303)
+DEFAULT_INVESTMENT_START_DATE = datetime(2026, 3, 31)
+DEFAULT_INITIAL_CAPITAL = 249_008_318  # 3/31 종가 확정 총자산 — 수익률 계산 기준점, 수정 금지
+DEFAULT_HISTORICAL_REALIZED_PROFIT = 67_571_303  # (249,008,318 - 226,356,552) + 44,919,537
 DEFAULT_BACKTEST_START_DATE = datetime(2000, 1, 1)
 
-DEFAULT_GEN_KOSPI_BAL = _cfg_int("gen_kospi_bal", 100_870_700)
-DEFAULT_GEN_GOLD_BAL  = _cfg_int("gen_gold_bal",            0)
-DEFAULT_ISA_A_BAL     = _cfg_int("isa_a_bal",      74_281_904)
-DEFAULT_ISA_B_BAL     = _cfg_int("isa_b_bal",      73_855_714)
+DEFAULT_GEN_KOSPI_BAL = 100_870_700  # 사이드바 기본값 (수익률 계산 무관)
+DEFAULT_GEN_GOLD_BAL  = 0
+DEFAULT_ISA_A_BAL     = 74_281_904
+DEFAULT_ISA_B_BAL     = 73_855_714
 
-# 확정 현금흐름만 전략 NAV 계산에 반영한다.
-# 미확정 예정 입금은 PERSONAL_CASH_FLOWS_PENDING 에만 보관하고
-# 확정 시 secrets.toml 의 [cash_flows_confirmed] 로 이동하면 자동 반영된다.
-PERSONAL_CASH_FLOWS_PENDING   = _cfg_cash_flows("cash_flows_pending")
-PERSONAL_CASH_FLOWS_CONFIRMED = _cfg_cash_flows("cash_flows_confirmed")
-PERSONAL_CASH_FLOWS           = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
+# 미확정 예정 입금 — NAV 계산에 반영되지 않음. 확정 시 CONFIRMED 으로 이동.
+PERSONAL_CASH_FLOWS_PENDING = {
+    "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
+}
+# 확정 입금 — NAV 계산에 반영됨. 입금 확정마다 여기에 추가.
+PERSONAL_CASH_FLOWS_CONFIRMED = {
+}
+PERSONAL_CASH_FLOWS = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
 
 ASSETS = {
     '코스피200': '294400',
