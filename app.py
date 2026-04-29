@@ -551,7 +551,7 @@ INFLATION_STRESS_REGIMES = [
         "note": "원자재 가격 상승과 금리 부담",
     },
     {
-        "name": "글로벌 원자재 인플레",
+        "name": "원자재 인플레/금융위기",
         "start": "2007-01-01",
         "end": "2008-12-31",
         "note": "금융위기 전후 원자재 인플레와 위험자산 충격",
@@ -575,6 +575,13 @@ INFLATION_STRESS_REGIMES = [
         "note": "물가 둔화 후에도 높은 금리 수준 지속",
     },
 ]
+
+KOSPI_SIDEWAYS_REGIME = {
+    "name": "코스피 지옥의 횡보장",
+    "start": "2011-01-01",
+    "end": "2018-12-31",
+    "note": "코스피가 장기간 박스권/횡보를 보인 구간",
+}
 
 # 보조 벤치마크 ETF
 BENCHMARK_ETF = {
@@ -4059,6 +4066,99 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 barmode="relative", height=420, hovermode="x unified",
             )
             st.plotly_chart(fig_cash, use_container_width=True)
+
+            yearly_asset_cols = [c for c in list(ASSETS.keys()) + [CASH_NAME] if c in df_cash_diag.columns]
+            yearly_asset_contrib = (
+                df_cash_diag.groupby("year", as_index=False)[yearly_asset_cols + ["합계"]]
+                .sum()
+                .sort_values("year")
+            )
+
+            st.markdown("#### 🧩 연도별 자산별 기여도")
+            fig_year_assets = go.Figure()
+            asset_role_colors = {
+                '코스피200': '#1f77b4',
+                '미국나스닥100': '#ff7f0e',
+                '한국채30년': '#2ca02c',
+                '미국채30년': '#d62728',
+                '금현물': '#FFD700',
+                CASH_NAME: '#9467bd',
+            }
+            for ac in yearly_asset_cols:
+                fig_year_assets.add_trace(go.Bar(
+                    x=yearly_asset_contrib["year"],
+                    y=yearly_asset_contrib[ac],
+                    name=ac.replace("(MMF)", "/CD91") if ac == CASH_NAME else ac,
+                    marker_color=asset_role_colors.get(ac, "#7f7f7f"),
+                    hovertemplate="%{x}<br>" + ac + ": %{y:.2f}pp<extra></extra>",
+                ))
+            fig_year_assets.add_trace(go.Scatter(
+                x=yearly_asset_contrib["year"],
+                y=yearly_asset_contrib["합계"],
+                mode="lines+markers",
+                name="연간 합계",
+                line=dict(color="black", width=1.5),
+                hovertemplate="%{x}<br>연간 합계: %{y:.2f}pp<extra></extra>",
+            ))
+            fig_year_assets.update_layout(
+                title="연도별 자산별 누적 기여도",
+                xaxis_title="연도",
+                yaxis_title="기여도 (pp)",
+                barmode="relative",
+                height=500,
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_year_assets, use_container_width=True)
+
+            display_yearly_assets = yearly_asset_contrib.copy()
+            display_yearly_assets["최대 기여"] = display_yearly_assets[yearly_asset_cols].idxmax(axis=1)
+            display_yearly_assets["최대 손실"] = display_yearly_assets[yearly_asset_cols].idxmin(axis=1)
+            display_yearly_assets["최대 기여값"] = display_yearly_assets.apply(lambda r: r[r["최대 기여"]], axis=1)
+            display_yearly_assets["최대 손실값"] = display_yearly_assets.apply(lambda r: r[r["최대 손실"]], axis=1)
+            for col in yearly_asset_cols + ["합계", "최대 기여값", "최대 손실값"]:
+                display_yearly_assets[col] = display_yearly_assets[col].apply(lambda x: f"{x:+.2f}pp")
+
+            with st.expander("📋 연도별 자산별 기여 상세"):
+                st.dataframe(display_yearly_assets.rename(columns={"year": "연도"}), use_container_width=True, hide_index=True)
+
+            side_start = pd.Timestamp(KOSPI_SIDEWAYS_REGIME["start"])
+            side_end = min(pd.Timestamp(KOSPI_SIDEWAYS_REGIME["end"]), pd.Timestamp(current_date))
+            if side_start <= side_end:
+                side_metrics = calculate_period_nav_metrics(nav_df, side_start, side_end)
+                side_mask = (df_cash_diag["year"] >= side_start.year) & (df_cash_diag["year"] <= side_end.year)
+                side_attr = df_cash_diag[side_mask].copy()
+                if side_metrics is not None and not side_attr.empty:
+                    st.markdown("#### 🇰🇷 코스피 횡보장(2011~2018) 대응")
+                    side_contrib = side_attr[yearly_asset_cols].sum().sort_values(ascending=False)
+                    side_cash_weight_values = [
+                        float(rec.get(CASH_NAME, 0.0) or 0.0)
+                        for rec in faber_weight_records
+                        if side_start <= pd.Timestamp(rec["date"]) <= side_end
+                    ]
+                    side_avg_cash = float(np.mean(side_cash_weight_values)) if side_cash_weight_values else 0.0
+
+                    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                    sc1.metric("기간 CAGR", f"{side_metrics['cagr']*100:.2f}%")
+                    sc2.metric("기간 MDD", f"{side_metrics['mdd']*100:.2f}%")
+                    sc3.metric("평균 현금비중", f"{side_avg_cash*100:.0f}%")
+                    sc4.metric("코스피 기여", f"{side_contrib.get('코스피200', 0.0):+.1f}pp")
+                    sc5.metric("최대 기여 자산", f"{side_contrib.index[0]}", f"{side_contrib.iloc[0]:+.1f}pp")
+
+                    fig_side = go.Figure()
+                    fig_side.add_trace(go.Bar(
+                        x=side_contrib.index,
+                        y=side_contrib.values,
+                        marker_color=[asset_role_colors.get(x, "#7f7f7f") for x in side_contrib.index],
+                        hovertemplate="%{x}<br>기여도: %{y:.2f}pp<extra></extra>",
+                    ))
+                    fig_side.update_layout(
+                        title=f"{KOSPI_SIDEWAYS_REGIME['name']} 자산별 기여도",
+                        xaxis_title="자산",
+                        yaxis_title="기여도 (pp)",
+                        height=360,
+                    )
+                    st.plotly_chart(fig_side, use_container_width=True)
+                    st.caption(KOSPI_SIDEWAYS_REGIME["note"])
 
             top_cash_years = yearly_cash.sort_values("현금 기여", ascending=False).head(5).copy()
             display_yearly_cash = yearly_cash.copy()
