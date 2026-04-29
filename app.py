@@ -3736,7 +3736,102 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         c3.metric("수익 월 / 손실 월", f"{positive_portfolio_months} / {negative_portfolio_months}")
         c4.metric("포트폴리오 승률", f"{positive_portfolio_months/max(positive_portfolio_months+negative_portfolio_months,1)*100:.0f}%")
         c5.metric("손익비", f"{port_plr:.2f}", help=f"평균수익 {avg_port_gain:+.2f}pp / 평균손실 {avg_port_loss:.2f}pp")
-        
+
+        # 현금/CD91 기여도 진단: 월별 기여도를 현금 vs 위험자산으로 분해한다.
+        if CASH_NAME in df_all_attr.columns:
+            st.markdown("#### 💵 현금/CD91 기여도 진단")
+            df_cash_diag = df_all_attr.copy()
+            df_cash_diag["year"] = df_cash_diag["date"].astype(str).str[:4].astype(int)
+            df_cash_diag["현금 기여"] = pd.to_numeric(df_cash_diag[CASH_NAME], errors="coerce").fillna(0.0)
+            df_cash_diag["위험자산 기여"] = pd.to_numeric(df_cash_diag["합계"], errors="coerce").fillna(0.0) - df_cash_diag["현금 기여"]
+
+            cash_weight_values = []
+            if faber_weight_records and len(faber_weight_records) > 1:
+                cash_weight_values = [
+                    float(rec.get(CASH_NAME, 0.0) or 0.0)
+                    for rec in faber_weight_records[:len(df_cash_diag)]
+                ]
+            if len(cash_weight_values) == len(df_cash_diag):
+                df_cash_diag["현금 비중"] = cash_weight_values
+            else:
+                df_cash_diag["현금 비중"] = np.nan
+
+            def _contribution_cagr(pp_values):
+                monthly = pd.to_numeric(pd.Series(pp_values), errors="coerce").fillna(0.0) / 100.0
+                if len(monthly) == 0:
+                    return 0.0
+                factor = float((1.0 + monthly.clip(lower=-0.99)).prod())
+                years = len(monthly) / 12.0
+                return factor ** (1.0 / years) - 1.0 if years > 0 and factor > 0 else 0.0
+
+            cash_cum = float(df_cash_diag["현금 기여"].sum())
+            risky_cum = float(df_cash_diag["위험자산 기여"].sum())
+            total_cum = float(df_cash_diag["합계"].sum())
+            cash_share = (cash_cum / total_cum * 100.0) if abs(total_cum) > 1e-9 else 0.0
+            avg_cash_weight = float(df_cash_diag["현금 비중"].mean()) if df_cash_diag["현금 비중"].notna().any() else 0.0
+            high_cash_months = int((df_cash_diag["현금 비중"] >= 0.8).sum()) if df_cash_diag["현금 비중"].notna().any() else 0
+
+            dc1, dc2, dc3, dc4, dc5 = st.columns(5)
+            dc1.metric("현금 누적 기여", f"{cash_cum:.1f}pp")
+            dc2.metric("위험자산 누적 기여", f"{risky_cum:.1f}pp")
+            dc3.metric("현금 기여 비중", f"{cash_share:.0f}%")
+            dc4.metric("현금 기여 CAGR", f"{_contribution_cagr(df_cash_diag['현금 기여'])*100:.2f}%")
+            dc5.metric("평균 현금 비중", f"{avg_cash_weight*100:.0f}%", help=f"현금 80% 이상 월: {high_cash_months}개월")
+
+            yearly_cash = df_cash_diag.groupby("year", as_index=False).agg({
+                "현금 기여": "sum",
+                "위험자산 기여": "sum",
+                "합계": "sum",
+                "현금 비중": "mean",
+            })
+            yearly_cash["현금 기여 비중"] = np.where(
+                yearly_cash["합계"].abs() > 1e-9,
+                yearly_cash["현금 기여"] / yearly_cash["합계"] * 100.0,
+                0.0,
+            )
+
+            fig_cash = go.Figure()
+            fig_cash.add_trace(go.Bar(
+                x=yearly_cash["year"], y=yearly_cash["현금 기여"],
+                name="현금/CD91", marker_color="#9467bd",
+                hovertemplate="%{x}<br>현금/CD91: %{y:.2f}pp<extra></extra>",
+            ))
+            fig_cash.add_trace(go.Bar(
+                x=yearly_cash["year"], y=yearly_cash["위험자산 기여"],
+                name="위험자산", marker_color="#7f7f7f",
+                hovertemplate="%{x}<br>위험자산: %{y:.2f}pp<extra></extra>",
+            ))
+            fig_cash.add_trace(go.Scatter(
+                x=yearly_cash["year"], y=yearly_cash["합계"],
+                mode="lines+markers", name="연간 합계",
+                line=dict(color="black", width=1.5),
+                hovertemplate="%{x}<br>합계: %{y:.2f}pp<extra></extra>",
+            ))
+            fig_cash.update_layout(
+                title="연도별 현금/CD91 vs 위험자산 기여도",
+                xaxis_title="연도", yaxis_title="기여도 (pp)",
+                barmode="relative", height=420, hovermode="x unified",
+            )
+            st.plotly_chart(fig_cash, use_container_width=True)
+
+            top_cash_years = yearly_cash.sort_values("현금 기여", ascending=False).head(5).copy()
+            display_yearly_cash = yearly_cash.copy()
+            display_yearly_cash["현금 비중"] = display_yearly_cash["현금 비중"].apply(
+                lambda x: f"{x*100:.0f}%" if pd.notna(x) else "-"
+            )
+            display_yearly_cash["현금 기여 비중"] = display_yearly_cash["현금 기여 비중"].apply(lambda x: f"{x:.0f}%")
+            for col in ["현금 기여", "위험자산 기여", "합계"]:
+                display_yearly_cash[col] = display_yearly_cash[col].apply(lambda x: f"{x:+.2f}pp")
+
+            with st.expander("📋 연도별 현금 기여 상세"):
+                st.dataframe(display_yearly_cash.rename(columns={"year": "연도"}), use_container_width=True, hide_index=True)
+                top_text = ", ".join(
+                    f"{int(row['year'])}년 {row['현금 기여']:+.1f}pp"
+                    for _, row in top_cash_years.iterrows()
+                )
+                st.caption(f"현금 기여 상위 연도: {top_text}")
+            st.caption("※ 현금/위험자산 기여 CAGR은 월별 기여도만 따로 누적한 진단 지표입니다. 실제 포트폴리오 CAGR의 엄밀한 산술 분해와는 다릅니다.")
+
         role_rows = []
         for an in asset_names:
             vals = df_all_attr[an].values
