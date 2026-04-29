@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .env
+.streamlit/secrets.toml
 
 # OS
 .DS_Store

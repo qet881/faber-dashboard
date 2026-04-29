@@ -5,6 +5,7 @@ import numpy as np
 import pytz
 import requests
 import hashlib
+import os
 
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -154,6 +155,88 @@ def _fetch_fred_series(series_id, start_date, end_date):
 
     # 2) 공개 CSV fallback (키 불필요)
     return _fetch_fred_series_csv(series_id, start_ts, end_ts)
+
+
+def _get_config_secret(*names):
+    for name in names:
+        try:
+            value = st.secrets[name]
+            if value:
+                return str(value)
+        except Exception:
+            pass
+        value = os.environ.get(name)
+        if value:
+            return str(value)
+    return None
+
+
+@st.cache_data(ttl=86400)
+def _fetch_ecos_daily_series(stat_code, item_code, start_date, end_date):
+    """ECOS 일별 시계열 조회. st.secrets 또는 환경변수의 ECOS_API_KEY/BOK_API_KEY를 사용한다."""
+    api_key = _get_config_secret("ECOS_API_KEY", "BOK_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        start_s = start_ts.strftime("%Y%m%d")
+        end_s = end_ts.strftime("%Y%m%d")
+        url = (
+            f"https://ecos.bok.or.kr/api/StatisticSearch/{api_key}/json/kr/1/100000/"
+            f"{stat_code}/D/{start_s}/{end_s}/{item_code}"
+        )
+        res = requests.get(url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+        payload = data.get("StatisticSearch", {})
+        rows = payload.get("row", [])
+        if not rows:
+            return None
+
+        dates = pd.to_datetime([r.get("TIME") for r in rows], format="%Y%m%d", errors="coerce")
+        values = pd.to_numeric([r.get("DATA_VALUE") for r in rows], errors="coerce")
+        s = pd.Series(values, index=dates).dropna()
+        s = s[(s.index >= start_ts) & (s.index <= end_ts)]
+        if s.empty:
+            return None
+        return s[~s.index.duplicated(keep="last")].sort_index().astype(float)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=86400)
+def fetch_cd91_rate_series(start_date, end_date):
+    """ECOS CD(91일) 일별 금리(연 %)를 조회한다."""
+    return _fetch_ecos_daily_series("817Y002", "010502000", start_date, end_date)
+
+
+def build_cash_price_index_from_annual_rates(rates, start_date, end_date, spread=0.0, fallback_annual_rate=0.025):
+    """연율 금리 시계열을 영업일 기준 현금 가격지수로 변환한다."""
+    dates = pd.bdate_range(start=start_date, end=end_date)
+    if len(dates) == 0:
+        return None
+
+    if rates is None or len(rates) == 0:
+        annual_rates = pd.Series(float(fallback_annual_rate), index=dates)
+    else:
+        rate_decimal = pd.Series(rates).sort_index().astype(float) / 100.0
+        annual_rates = rate_decimal.reindex(dates).ffill().bfill()
+        if annual_rates.isna().all():
+            annual_rates = pd.Series(float(fallback_annual_rate), index=dates)
+        else:
+            annual_rates = annual_rates.fillna(float(fallback_annual_rate))
+        annual_rates = (annual_rates - float(spread)).clip(lower=0.0)
+
+    prices = [10000.0]
+    for i in range(1, len(dates)):
+        elapsed_days = max(1, (dates[i] - dates[i - 1]).days)
+        annual_rate = float(annual_rates.iloc[i - 1])
+        period_ret = (1 + annual_rate) ** (elapsed_days / 365.0) - 1
+        prices.append(prices[-1] * (1 + period_ret))
+
+    return pd.DataFrame({"Close": prices, "Adj Close": prices}, index=dates)
 
 
 @st.cache_data(ttl=86400)
@@ -427,9 +510,10 @@ PROXY_ASSETS = {
 }
 
 PROXY_CASH = {
-    'type': 'synthetic_cash',
-    'annual_rate': 0.025,
-    'note': '합성 현금 (연 2.5% 가정)'
+    'type': 'cd91_cash',
+    'spread': 0.0015,
+    'fallback_annual_rate': 0.025,
+    'note': 'ECOS CD91 - 0.15%p 합성 현금 (실패 시 연 2.5%)'
 }
 
 # 보조 벤치마크 ETF
@@ -682,6 +766,16 @@ def fetch_proxy_data(asset_name, start_date, end_date):
             config = PROXY_ASSETS.get(asset_name)
         if config is None: return None
         
+        if config['type'] == 'cd91_cash':
+            rates = fetch_cd91_rate_series(start_date, end_date)
+            return build_cash_price_index_from_annual_rates(
+                rates,
+                start_date,
+                end_date,
+                spread=config.get('spread', 0.0015),
+                fallback_annual_rate=config.get('fallback_annual_rate', 0.025),
+            )
+
         if config['type'] == 'synthetic_cash':
             # 2000-01-01부터 영업일 기준으로 합성 현금을 생성한다.
             # KODEX200 데이터 존재 여부와 무관하게 pd.bdate_range를 직접 사용.
@@ -2852,7 +2946,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             f"| 한국채30년 | KOSEF 국고채10년 × {KR_BOND_DURATION_FACTOR}배 | 실제 ETF (439870) |\n"
             "| 미국채30년 | TLT × USD/KRW | 실제 ETF (476760) |\n"
             "| 금현물 | GLD × USD/KRW | ACE KRX금현물 (411060) |\n"
-            "| 현금 | 합성 (연 2.5%) | 실제 MMF ETF (455890) |\n\n"
+            "| 현금 | ECOS CD91 - 0.15%p 합성 (실패 시 연 2.5%) | 실제 MMF ETF (455890) |\n\n"
             "💡 **체인링크**: 프록시 → ETF 전환 시점에서 가격을 연결하여 수익률 연속성을 유지합니다.\n\n"
             "⚠️ 금현물 Faber 신호는 별도 모멘텀 시리즈(0064K0 우선, 실패 시 GLD×환율 fallback)를 사용합니다.\n\n"
             "⚠️ 최근 기간의 모멘텀/기여도는 실제 ETF 데이터 기반으로 정확합니다."
@@ -5214,7 +5308,7 @@ def main():
 
     st.markdown("---")
     st.caption("ℹ️ 본 대시보드는 과거 데이터 기반이며 투자 권유가 아닙니다.")
-    st.caption(f"📌 데이터: FinanceDataReader | 현금: {CASH_NAME} ({CASH_TICKER})")
+    st.caption(f"📌 데이터: FinanceDataReader / ECOS | 현금: {CASH_NAME} ({CASH_TICKER}, 상장 전 CD91 프록시)")
 
 if __name__ == "__main__":
     main()
