@@ -212,6 +212,27 @@ def fetch_cd91_rate_series(start_date, end_date):
     return _fetch_ecos_daily_series("817Y002", "010502000", start_date, end_date)
 
 
+@st.cache_data(ttl=86400)
+def fetch_korea_cpi_inflation_series(start_date, end_date):
+    """FRED/World Bank 한국 CPI 연간 상승률(%)을 조회한다."""
+    return _fetch_fred_series("FPCPITOTLZGKOR", start_date, end_date)
+
+
+@st.cache_data(ttl=86400)
+def fetch_us_cpi_yoy_series(start_date, end_date):
+    """FRED 미국 CPI 지수에서 월별 YoY 상승률(%)을 계산한다."""
+    cpi = _fetch_fred_series("CPIAUCSL", pd.Timestamp(start_date) - relativedelta(months=13), end_date)
+    if cpi is None or len(cpi) == 0:
+        return None
+    cpi = cpi.sort_index().astype(float)
+    yoy = cpi.pct_change(12) * 100.0
+    yoy = yoy.dropna()
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    yoy = yoy[(yoy.index >= start_ts) & (yoy.index <= end_ts)]
+    return yoy if len(yoy) > 0 else None
+
+
 def build_cash_price_index_from_annual_rates(rates, start_date, end_date, spread=0.0, fallback_annual_rate=0.025):
     """연율 금리 시계열을 영업일 기준 현금 가격지수로 변환한다."""
     dates = pd.bdate_range(start=start_date, end=end_date)
@@ -515,6 +536,45 @@ PROXY_CASH = {
     'fallback_annual_rate': 0.025,
     'note': 'ECOS CD91 - 0.15%p 합성 현금 (실패 시 연 2.5%)'
 }
+
+INFLATION_STRESS_REGIMES = [
+    {
+        "name": "고물가/고금리 잔존",
+        "start": "2000-01-01",
+        "end": "2001-12-31",
+        "note": "외환위기 이후 고금리 여진과 물가 부담",
+    },
+    {
+        "name": "원자재/유가 부담",
+        "start": "2004-01-01",
+        "end": "2004-12-31",
+        "note": "원자재 가격 상승과 금리 부담",
+    },
+    {
+        "name": "글로벌 원자재 인플레",
+        "start": "2007-01-01",
+        "end": "2008-12-31",
+        "note": "금융위기 전후 원자재 인플레와 위험자산 충격",
+    },
+    {
+        "name": "유가/식품 인플레",
+        "start": "2010-01-01",
+        "end": "2011-12-31",
+        "note": "유가·식품 가격 상승과 신흥국 긴축",
+    },
+    {
+        "name": "대인플레/급격한 긴축",
+        "start": "2021-01-01",
+        "end": "2023-12-31",
+        "note": "코로나 이후 물가 급등과 글로벌 금리 인상",
+    },
+    {
+        "name": "고금리 체류",
+        "start": "2024-01-01",
+        "end": "2025-12-31",
+        "note": "물가 둔화 후에도 높은 금리 수준 지속",
+    },
+]
 
 # 보조 벤치마크 ETF
 BENCHMARK_ETF = {
@@ -2459,6 +2519,40 @@ def calculate_performance_metrics(daily_nav_df, initial_capital):
     cagr = (current_value / initial_capital) ** (1 / years) - 1 if years > 0 else total_return
     return current_value, total_return, mdd, cagr
 
+
+def slice_nav_period(daily_nav_df, start_date, end_date):
+    if daily_nav_df is None or daily_nav_df.empty:
+        return None
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    nav = daily_nav_df[(daily_nav_df.index >= start_ts) & (daily_nav_df.index <= end_ts)].copy()
+    if len(nav) < 2:
+        return None
+    nav["running_max"] = nav["nav"].expanding().max()
+    nav["drawdown"] = (nav["nav"] - nav["running_max"]) / nav["running_max"]
+    return nav
+
+
+def calculate_period_nav_metrics(daily_nav_df, start_date, end_date):
+    nav = slice_nav_period(daily_nav_df, start_date, end_date)
+    if nav is None:
+        return None
+    start_value = float(nav["nav"].iloc[0])
+    end_value = float(nav["nav"].iloc[-1])
+    days = (nav.index[-1] - nav.index[0]).days
+    years = days / 365.25 if days > 0 else 0.0
+    total_return = end_value / start_value - 1 if start_value > 0 else 0.0
+    cagr = (end_value / start_value) ** (1 / years) - 1 if years > 0 and start_value > 0 else total_return
+    return {
+        "start": nav.index[0],
+        "end": nav.index[-1],
+        "days": days,
+        "total_return": float(total_return),
+        "cagr": float(cagr),
+        "mdd": float(nav["drawdown"].min()),
+    }
+
+
 def calculate_sharpe_ratio(daily_nav_df, risk_free_annual=0.025):
     """연율화 Sharpe Ratio 계산 (일별 수익률 기준)."""
     if daily_nav_df is None or len(daily_nav_df) < 20: return None
@@ -3707,6 +3801,158 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 
                 with st.expander("📊 월별 수익률 상세"):
                     st.dataframe(df_filt, use_container_width=True, hide_index=True, height=400)
+
+            # 인플레이션/금리상승 국면 성과 분석
+            st.markdown("---")
+            st.subheader("🔥 인플레이션/금리상승 국면 성과 분석")
+            st.caption("수동으로 정의한 인플레 스트레스 구간에서 Faber A가 현금, 장기채, 금을 어떻게 활용했는지 확인합니다. CPI는 FRED 데이터를 사용합니다.")
+
+            kr_cpi = fetch_korea_cpi_inflation_series(bt_start_date, current_date)
+            us_cpi = fetch_us_cpi_yoy_series(bt_start_date, current_date)
+            df_regime_attr = df_fa.copy()
+            df_regime_attr["period_date"] = pd.to_datetime(df_regime_attr["date"] + "-01", errors="coerce")
+
+            regime_rows = []
+            regime_chart_rows = []
+            inflation_months = set()
+            for regime in INFLATION_STRESS_REGIMES:
+                r_start = max(pd.Timestamp(regime["start"]), pd.Timestamp(bt_start_date))
+                r_end = min(pd.Timestamp(regime["end"]), pd.Timestamp(current_date))
+                if r_start > r_end:
+                    continue
+
+                metrics = calculate_period_nav_metrics(nav_df, r_start, r_end)
+                if metrics is None:
+                    continue
+
+                attr_mask = (
+                    (df_regime_attr["period_date"] >= r_start.to_period("M").to_timestamp()) &
+                    (df_regime_attr["period_date"] <= r_end.to_period("M").to_timestamp())
+                )
+                attr_slice = df_regime_attr[attr_mask].copy()
+                for d in attr_slice["date"]:
+                    inflation_months.add(d)
+
+                cash_contrib = float(attr_slice[CASH_NAME].sum()) if CASH_NAME in attr_slice.columns else 0.0
+                kr_bond_contrib = float(attr_slice.get("한국채30년", pd.Series(dtype=float)).sum())
+                us_bond_contrib = float(attr_slice.get("미국채30년", pd.Series(dtype=float)).sum())
+                bond_contrib = kr_bond_contrib + us_bond_contrib
+                gold_contrib = float(attr_slice.get("금현물", pd.Series(dtype=float)).sum())
+                total_contrib = float(attr_slice["합계"].sum()) if "합계" in attr_slice.columns else 0.0
+                risky_contrib = total_contrib - cash_contrib
+
+                avg_cash_weight = None
+                if faber_weight_records:
+                    weights_in_regime = [
+                        float(rec.get(CASH_NAME, 0.0) or 0.0)
+                        for rec in faber_weight_records
+                        if r_start <= pd.Timestamp(rec["date"]) <= r_end
+                    ]
+                    if weights_in_regime:
+                        avg_cash_weight = float(np.mean(weights_in_regime))
+
+                kr_cpi_slice = None
+                if kr_cpi is not None and len(kr_cpi) > 0:
+                    kr_years = kr_cpi[(kr_cpi.index.year >= r_start.year) & (kr_cpi.index.year <= r_end.year)]
+                    if len(kr_years) > 0:
+                        kr_cpi_slice = kr_years
+
+                us_cpi_slice = None
+                if us_cpi is not None and len(us_cpi) > 0:
+                    us_cpi_slice = us_cpi[(us_cpi.index >= r_start) & (us_cpi.index <= r_end)]
+                    if len(us_cpi_slice) == 0:
+                        us_cpi_slice = None
+
+                regime_rows.append({
+                    "국면": regime["name"],
+                    "기간": f"{metrics['start'].strftime('%Y-%m')}~{metrics['end'].strftime('%Y-%m')}",
+                    "누적 수익률": metrics["total_return"],
+                    "CAGR": metrics["cagr"],
+                    "MDD": metrics["mdd"],
+                    "평균 현금비중": avg_cash_weight,
+                    "현금 기여": cash_contrib,
+                    "위험자산 기여": risky_contrib,
+                    "장기채 기여": bond_contrib,
+                    "금 기여": gold_contrib,
+                    "KR CPI 평균": float(kr_cpi_slice.mean()) if kr_cpi_slice is not None else None,
+                    "KR CPI 최대": float(kr_cpi_slice.max()) if kr_cpi_slice is not None else None,
+                    "US CPI 평균": float(us_cpi_slice.mean()) if us_cpi_slice is not None else None,
+                    "US CPI 최대": float(us_cpi_slice.max()) if us_cpi_slice is not None else None,
+                    "메모": regime["note"],
+                })
+                regime_chart_rows.extend([
+                    {"국면": regime["name"], "구분": "현금/CD91", "기여도": cash_contrib},
+                    {"국면": regime["name"], "구분": "위험자산", "기여도": risky_contrib},
+                    {"국면": regime["name"], "구분": "장기채", "기여도": bond_contrib},
+                    {"국면": regime["name"], "구분": "금", "기여도": gold_contrib},
+                ])
+
+            if regime_rows:
+                df_regime = pd.DataFrame(regime_rows)
+                r1, r2, r3, r4, r5 = st.columns(5)
+                stress_cagr = float(df_regime["CAGR"].mean())
+                stress_mdd = float(df_regime["MDD"].min())
+                stress_cash_weight = float(df_regime["평균 현금비중"].dropna().mean()) if df_regime["평균 현금비중"].notna().any() else 0.0
+                stress_cash_contrib = float(df_regime["현금 기여"].sum())
+                stress_bond_contrib = float(df_regime["장기채 기여"].sum())
+                r1.metric("국면 수", f"{len(df_regime)}개")
+                r2.metric("평균 CAGR", f"{stress_cagr*100:.2f}%")
+                r3.metric("최악 MDD", f"{stress_mdd*100:.2f}%")
+                r4.metric("평균 현금비중", f"{stress_cash_weight*100:.0f}%")
+                r5.metric("현금/장기채 기여", f"{stress_cash_contrib:+.1f} / {stress_bond_contrib:+.1f}pp")
+
+                stress_monthly = df_regime_attr[df_regime_attr["date"].isin(inflation_months)].copy()
+                normal_monthly = df_regime_attr[~df_regime_attr["date"].isin(inflation_months)].copy()
+                if not stress_monthly.empty and not normal_monthly.empty:
+                    st.caption(
+                        "일반 구간 대비: "
+                        f"인플레 월평균 합계 {stress_monthly['합계'].mean():+.2f}pp vs "
+                        f"일반 월평균 합계 {normal_monthly['합계'].mean():+.2f}pp | "
+                        f"인플레 월평균 현금 {stress_monthly[CASH_NAME].mean():+.2f}pp vs "
+                        f"일반 월평균 현금 {normal_monthly[CASH_NAME].mean():+.2f}pp"
+                    )
+
+                fig_regime = go.Figure()
+                for label, color in [("현금/CD91", "#9467bd"), ("위험자산", "#7f7f7f")]:
+                    y_vals = [
+                        row["기여도"] for row in regime_chart_rows
+                        if row["구분"] == label
+                    ]
+                    fig_regime.add_trace(go.Bar(
+                        x=df_regime["국면"], y=y_vals, name=label, marker_color=color,
+                        hovertemplate="%{x}<br>" + label + ": %{y:.2f}pp<extra></extra>",
+                    ))
+                fig_regime.add_trace(go.Scatter(
+                    x=df_regime["국면"], y=df_regime["CAGR"] * 100.0,
+                    mode="lines+markers", name="CAGR",
+                    line=dict(color="black", width=1.5),
+                    yaxis="y2",
+                    hovertemplate="%{x}<br>CAGR: %{y:.2f}%<extra></extra>",
+                ))
+                fig_regime.update_layout(
+                    title="인플레/고금리 국면별 기여도와 CAGR",
+                    xaxis_title="국면", yaxis_title="기여도 (pp)",
+                    yaxis2=dict(title="CAGR (%)", overlaying="y", side="right", showgrid=False),
+                    barmode="relative", height=450, hovermode="x unified",
+                )
+                st.plotly_chart(fig_regime, use_container_width=True)
+
+                df_regime_display = df_regime.copy()
+                pct_cols = ["누적 수익률", "CAGR", "MDD", "평균 현금비중"]
+                for col in pct_cols:
+                    df_regime_display[col] = df_regime_display[col].apply(lambda x: f"{x*100:.2f}%" if pd.notna(x) else "-")
+                pp_cols = ["현금 기여", "위험자산 기여", "장기채 기여", "금 기여"]
+                for col in pp_cols:
+                    df_regime_display[col] = df_regime_display[col].apply(lambda x: f"{x:+.2f}pp")
+                cpi_cols = ["KR CPI 평균", "KR CPI 최대", "US CPI 평균", "US CPI 최대"]
+                for col in cpi_cols:
+                    df_regime_display[col] = df_regime_display[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "-")
+
+                with st.expander("📋 인플레이션 국면 상세"):
+                    st.dataframe(df_regime_display, use_container_width=True, hide_index=True)
+                    st.caption("※ KR CPI는 FRED/World Bank 연간 한국 CPI 상승률, US CPI는 FRED CPIAUCSL 월별 YoY 상승률입니다.")
+            else:
+                st.info("선택한 백테스트 기간 안에 정의된 인플레이션/고금리 국면이 없습니다.")
 
     # ==============================
     # 자산별 역할 분석
