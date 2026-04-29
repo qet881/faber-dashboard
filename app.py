@@ -3785,9 +3785,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 "현금 비중": "mean",
             })
             yearly_cash["현금 기여 비중"] = np.where(
-                yearly_cash["합계"].abs() > 1e-9,
+                yearly_cash["합계"] > 1e-9,
                 yearly_cash["현금 기여"] / yearly_cash["합계"] * 100.0,
-                0.0,
+                np.nan,
             )
 
             fig_cash = go.Figure()
@@ -3819,7 +3819,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             display_yearly_cash["현금 비중"] = display_yearly_cash["현금 비중"].apply(
                 lambda x: f"{x*100:.0f}%" if pd.notna(x) else "-"
             )
-            display_yearly_cash["현금 기여 비중"] = display_yearly_cash["현금 기여 비중"].apply(lambda x: f"{x:.0f}%")
+            display_yearly_cash["현금 기여 비중"] = display_yearly_cash["현금 기여 비중"].apply(
+                lambda x: f"{x:.0f}%" if pd.notna(x) else "-"
+            )
             for col in ["현금 기여", "위험자산 기여", "합계"]:
                 display_yearly_cash[col] = display_yearly_cash[col].apply(lambda x: f"{x:+.2f}pp")
 
@@ -3847,7 +3849,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             crisis_months = [i for i, v in enumerate(df_all_attr["합계"].values) if v < -0.5]
             defense_count = sum(1 for i in crisis_months if vals[i] > 0.01) if crisis_months else 0
             defense_rate = defense_count / max(len(crisis_months), 1) * 100
-            
+            crisis_invested = sum(1 for i in crisis_months if abs(vals[i]) > 0.01) if crisis_months else 0
+            held_defense_rate = defense_count / max(crisis_invested, 1) * 100
+
             role_rows.append({
                 "자산": an,
                 "투자월": f"{total_months - zero_months}개월",
@@ -3858,11 +3862,12 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 "평균 수익": f"+{avg_gain:.2f}pp",
                 "평균 손실": f"{avg_loss:.2f}pp",
                 "위기방어": f"{defense_count}/{len(crisis_months)} ({defense_rate:.0f}%)",
+                "보유시 위기방어": f"{defense_count}/{crisis_invested} ({held_defense_rate:.0f}%)" if crisis_invested > 0 else "-",
             })
         
         df_role = pd.DataFrame(role_rows)
         st.dataframe(df_role, use_container_width=True, hide_index=True)
-        st.caption("💡 **승률**: 투자한 달 중 수익이 난 비율. **위기방어**: 포트폴리오 전체가 -0.5pp 이상 손실인 달에 해당 자산이 플러스 기여한 횟수.")
+        st.caption("💡 **승률**: 투자한 달 중 수익이 난 비율. **위기방어**: 포트폴리오 전체가 -0.5pp 이상 손실인 달에 해당 자산이 플러스 기여한 횟수. **보유시 위기방어**: 그 위기월 중 실제 기여가 있었던 달만 기준으로 본 플러스 기여율.")
         
         # 누적 기여도 차트
         cumul_data = {}
