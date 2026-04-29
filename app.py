@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import pytz
 import requests
+import hashlib
 
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -363,6 +364,7 @@ DEFAULT_INVESTMENT_START_DATE = datetime(2026, 3, 31)
 DEFAULT_INITIAL_CAPITAL = 249_008_318  # 3/31 종가 확정 총자산 — 수익률 계산 기준점, 수정 금지
 DEFAULT_HISTORICAL_REALIZED_PROFIT = 67_571_303  # (249,008,318 - 226,356,552) + 44,919,537
 DEFAULT_BACKTEST_START_DATE = datetime(2000, 1, 1)
+BACKTEST_DEFAULT_END_LAG_MONTHS = 1
 
 DEFAULT_GEN_KOSPI_BAL = 100_870_700  # 사이드바 기본값 (수익률 계산 무관)
 DEFAULT_GEN_GOLD_BAL  = 0
@@ -499,6 +501,130 @@ def normalize_to_date(dt):
 def get_month_end_date(date):
     next_month = date.replace(day=28) + timedelta(days=4)
     return next_month - timedelta(days=next_month.day)
+
+
+def get_default_backtest_end_date(current_date):
+    """Use the last completed month-end as the default reproducible backtest cut-off."""
+    return normalize_to_date(get_month_end_date(current_date - relativedelta(months=BACKTEST_DEFAULT_END_LAG_MONTHS)))
+
+
+def clamp_market_data_to_date(all_data, end_date):
+    """Return a copy of market data with every series capped at the requested end date."""
+    if all_data is None:
+        return None
+    end_ts = pd.Timestamp(end_date)
+    capped = {}
+    for name, df in all_data.items():
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            out = df.copy()
+            out = out[~out.index.duplicated(keep="last")].sort_index()
+            out = out[out.index <= end_ts]
+            capped[name] = out
+        else:
+            capped[name] = df
+    return capped
+
+
+def build_market_data_fingerprint(all_data, price_col="Adj Close"):
+    """Build a compact fingerprint so fixed-date backtests can be debugged and reproduced."""
+    rows = []
+    if not all_data:
+        return None, None
+
+    aggregate = hashlib.sha256()
+    for name, df in sorted(all_data.items(), key=lambda kv: str(kv[0])):
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            rows.append({"series": str(name), "rows": 0, "start": "-", "end": "-", "last": None, "hash": "-"})
+            aggregate.update(f"{name}|empty".encode("utf-8", errors="ignore"))
+            continue
+
+        clean = df[~df.index.duplicated(keep="last")].sort_index()
+        col = price_col if price_col in clean.columns else ("Close" if "Close" in clean.columns else clean.columns[0])
+        values = pd.to_numeric(clean[col], errors="coerce").dropna()
+        if values.empty:
+            rows.append({"series": str(name), "rows": int(len(clean)), "start": "-", "end": "-", "last": None, "hash": "-"})
+            aggregate.update(f"{name}|no-values".encode("utf-8", errors="ignore"))
+            continue
+
+        payload = values.round(10)
+        digest = hashlib.sha256(pd.util.hash_pandas_object(payload, index=True).values.tobytes()).hexdigest()[:12]
+        aggregate.update(f"{name}|{digest}|{len(values)}|{values.index.min()}|{values.index.max()}".encode("utf-8", errors="ignore"))
+        rows.append({
+            "series": str(name),
+            "rows": int(len(values)),
+            "start": values.index.min().strftime("%Y-%m-%d"),
+            "end": values.index.max().strftime("%Y-%m-%d"),
+            "last": float(values.iloc[-1]),
+            "hash": digest,
+        })
+
+    return pd.DataFrame(rows), aggregate.hexdigest()[:16]
+
+
+def render_backtest_reproducibility_status(bt_start_date, bt_end_date, price_col, fingerprint, fingerprint_df):
+    """Show whether the current backtest input matches the previous run in this session."""
+    key = "last_backtest_reproducibility_snapshot"
+    snapshot = {
+        "start": pd.Timestamp(bt_start_date).strftime("%Y-%m-%d"),
+        "end": pd.Timestamp(bt_end_date).strftime("%Y-%m-%d"),
+        "price_col": price_col,
+        "fingerprint": fingerprint,
+    }
+    previous = st.session_state.get(key)
+
+    if previous is None:
+        st.info("첫 실행 기준값을 저장했습니다. 다음 실행부터 데이터 변경 여부를 자동 비교합니다.")
+    else:
+        changed_fields = [
+            label for field, label in [
+                ("start", "시작일"),
+                ("end", "종료일"),
+                ("price_col", "가격 기준"),
+                ("fingerprint", "입력 데이터"),
+            ]
+            if previous.get(field) != snapshot.get(field)
+        ]
+        if not changed_fields:
+            st.success("이전 실행과 백테스트 입력이 동일합니다. 같은 결과가 재현되어야 합니다.")
+        else:
+            st.warning("이전 실행과 백테스트 입력이 변경되었습니다: " + ", ".join(changed_fields))
+            st.caption(
+                f"이전: {previous.get('start')} ~ {previous.get('end')} | "
+                f"{previous.get('price_col')} | {previous.get('fingerprint')}"
+            )
+            st.caption(
+                f"현재: {snapshot['start']} ~ {snapshot['end']} | "
+                f"{snapshot['price_col']} | {snapshot['fingerprint']}"
+            )
+
+    if fingerprint_df is not None and previous is not None and previous.get("fingerprint_df") is not None:
+        prev_df = previous["fingerprint_df"]
+        curr_df = fingerprint_df.copy()
+        compare = curr_df.merge(
+            prev_df[["series", "rows", "end", "last", "hash"]].rename(
+                columns={
+                    "rows": "prev_rows",
+                    "end": "prev_end",
+                    "last": "prev_last",
+                    "hash": "prev_hash",
+                }
+            ),
+            on="series",
+            how="outer",
+        )
+        changed = compare[
+            (compare["hash"] != compare["prev_hash"]) |
+            (compare["rows"] != compare["prev_rows"]) |
+            (compare["end"] != compare["prev_end"])
+        ]
+        if not changed.empty:
+            display_cols = ["series", "prev_end", "end", "prev_rows", "rows", "prev_last", "last"]
+            with st.expander("변경된 입력 데이터 상세", expanded=False):
+                st.dataframe(changed[display_cols], use_container_width=True, hide_index=True)
+
+    stored = snapshot.copy()
+    stored["fingerprint_df"] = fingerprint_df.copy() if fingerprint_df is not None else None
+    st.session_state[key] = stored
 
 
 # ==============================
@@ -2709,6 +2835,8 @@ def optimize_allocation(df_res, b_gen, b_isa_a, b_isa_b):
 # 10. UI 모드들
 # ==============================
 def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
+    requested_backtest_end = normalize_to_date(current_date)
+    current_date = requested_backtest_end
     st.title("📈 전략 백테스트 & 시장 분석")
     st.markdown(f"**기준시각:** {current_dt.strftime('%Y년 %m월 %d일 %H:%M:%S')}")
     st.caption("※ 월말 종가 기준(같은 날 체결) 12개월 모멘텀 기반 비중 전략입니다.")
@@ -2730,12 +2858,17 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             "⚠️ 최근 기간의 모멘텀/기여도는 실제 ETF 데이터 기반으로 정확합니다."
         )
 
+    st.caption(f"Backtest data cut-off: {requested_backtest_end.strftime('%Y-%m-%d')} (fixed)")
     data_start = bt_start_date - relativedelta(months=18)
     with st.spinner("시장 데이터 로딩 중... (하이브리드: 프록시+실제ETF, 최초 로딩 시 시간 소요)"):
-        all_data = load_market_data(data_start, current_date, hybrid=True)
+        all_data = load_market_data(data_start, requested_backtest_end, hybrid=True)
+        all_data = clamp_market_data_to_date(all_data, requested_backtest_end)
 
     # 보조 벤치마크 ETF 로딩
-    benchmark_raw = fetch_benchmark_etf(BENCHMARK_ETF['ticker'], bt_start_date, current_date)
+    benchmark_raw = fetch_benchmark_etf(BENCHMARK_ETF['ticker'], bt_start_date, requested_backtest_end)
+    if benchmark_raw is not None and not benchmark_raw.empty:
+        benchmark_raw = benchmark_raw[benchmark_raw.index <= pd.Timestamp(requested_backtest_end)]
+    fingerprint_df, fingerprint = build_market_data_fingerprint(all_data, price_col=price_col)
 
     with st.expander("📊 데이터 가용 기간 확인 (하이브리드)"):
         DEEP_PROXY_NOTES = {
@@ -2765,6 +2898,14 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.subheader(f"📊 Faber A 전략 과거 성과 (요청 시작: {bt_start_date.strftime('%Y-%m')})")
     
     # 메인 전략: Faber A
+    if fingerprint_df is not None:
+        st.caption(f"Data fingerprint: `{fingerprint}`")
+        render_backtest_reproducibility_status(
+            bt_start_date, requested_backtest_end, price_col, fingerprint, fingerprint_df
+        )
+        with st.expander("Backtest input fingerprint", expanded=False):
+            st.dataframe(fingerprint_df, use_container_width=True, hide_index=True)
+
     IC = 10_000_000
     nav_df = simulate_faber_strategy(bt_start_date, current_date, IC, all_data,
         mode='A', buffer_df=None, price_col=price_col)
@@ -2784,6 +2925,12 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     )
     
     # 기존 연속 모멘텀 (차트 비교 참고용)
+    st.caption(
+        f"Actual end: {nav_df.index.max().strftime('%Y-%m-%d')} | "
+        f"Requested end: {requested_backtest_end.strftime('%Y-%m-%d')} | "
+        f"Data fingerprint: {fingerprint}"
+    )
+
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
         bt_start_date, current_date, IC, all_data, price_col=price_col)
     # GTAA (정량 비교/GTAA 전용 섹션 공용)
@@ -4936,6 +5083,9 @@ def mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_ca
 
 
 def main():
+    KST = pytz.timezone('Asia/Seoul')
+    current_dt = datetime.now(KST).replace(tzinfo=None)
+    current_date = normalize_to_date(current_dt)
     st.sidebar.title("⚙️ 메뉴 및 설정")
     if st.sidebar.button("🔄 최신 데이터 새로고침"):
         st.cache_data.clear()
@@ -4950,6 +5100,30 @@ def main():
         st.markdown(f"**확인:** {hist_profit:,.0f}원")
         bt_start_date = datetime.combine(st.date_input("백테스트 시작일", DEFAULT_BACKTEST_START_DATE,
             help="하이브리드 모드: 2000-01-01~. FRED/ECOS 딥프록시 → 프록시 → 실제ETF 3계층 체인링크."), datetime.min.time())
+        auto_bt_end = st.checkbox(
+            "백테스트 종료일을 오늘로 자동 갱신",
+            value=True,
+            help="켜두면 오늘까지 자동 포함합니다. 과거 결과를 그대로 재현하려면 끄고 종료일을 고정하세요.",
+        )
+        if auto_bt_end:
+            bt_end_date = current_date
+            st.caption(f"자동 종료일: {bt_end_date.strftime('%Y-%m-%d')}")
+        else:
+            default_bt_end_date = get_default_backtest_end_date(current_date)
+            bt_end_date = datetime.combine(
+                st.date_input(
+                    "백테스트 종료일",
+                    default_bt_end_date,
+                    help="재현성을 위해 종료일을 명시 고정합니다.",
+                ),
+                datetime.min.time(),
+            )
+        if bt_end_date > current_date:
+            st.warning(f"백테스트 종료일이 오늘({current_date.strftime('%Y-%m-%d')})보다 늦어 오늘로 제한합니다.")
+            bt_end_date = current_date
+        if bt_end_date < bt_start_date:
+            st.warning("백테스트 종료일이 시작일보다 빨라 시작일로 제한합니다.")
+            bt_end_date = bt_start_date
     st.sidebar.markdown("---")
 
     with st.sidebar.expander("🥇 금 괴리율 차익거래 계산기", expanded=False):
@@ -5034,13 +5208,9 @@ def main():
         st.session_state["mode_select"] = options[0]
     mode = st.sidebar.radio("기능 선택", options, key="mode_select")
 
-    KST = pytz.timezone('Asia/Seoul')
-    current_dt = datetime.now(KST).replace(tzinfo=None)
-    current_date = normalize_to_date(current_dt)
-
     if mode.startswith("1."): mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date)
-    elif mode.startswith("2."): mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date)
-    else: mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_capital)
+    elif mode.startswith("2."): mode_strategy_backtest(current_dt, bt_end_date, price_col, bt_start_date)
+    else: mode_monte_carlo(current_dt, bt_end_date, price_col, bt_start_date, init_capital)
 
     st.markdown("---")
     st.caption("ℹ️ 본 대시보드는 과거 데이터 기반이며 투자 권유가 아닙니다.")
