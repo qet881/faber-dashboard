@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .env
 .streamlit/secrets.toml
+.codex-private/
 
 # OS
 .DS_Store
