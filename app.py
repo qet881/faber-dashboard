@@ -477,10 +477,10 @@ DEFAULT_ISA_B_BAL     = 73_855_714
 
 # 미확정 예정 입금 — NAV 계산에 반영되지 않음. 확정 시 CONFIRMED 으로 이동.
 PERSONAL_CASH_FLOWS_PENDING = {
-    "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
 }
 # 확정 입금 — NAV 계산에 반영됨. 입금 확정마다 여기에 추가.
 PERSONAL_CASH_FLOWS_CONFIRMED = {
+    "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
 }
 PERSONAL_CASH_FLOWS = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
 
