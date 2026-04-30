@@ -5,6 +5,7 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 .codex-private/
+faber-investment-memory/
 
 # OS
 .DS_Store

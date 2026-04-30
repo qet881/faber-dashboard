@@ -6,6 +6,8 @@ import pytz
 import requests
 import hashlib
 import os
+import re
+from pathlib import Path
 
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -484,6 +486,8 @@ PERSONAL_CASH_FLOWS_CONFIRMED = {
     "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
 }
 PERSONAL_CASH_FLOWS = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
+MONTHLY_LEDGER_PATH = Path(__file__).resolve().parent / "faber-investment-memory" / "monthly_ledger.md"
+MONTHLY_LEDGER_CSV_PATH = Path(__file__).resolve().parent / "faber-investment-memory" / "monthly_ledger.csv"
 
 ASSETS = {
     '코스피200': '294400',
@@ -2471,6 +2475,103 @@ def calculate_cumulative_principal(initial_capital, cash_flows, evaluation_date)
     return principal
 
 
+@st.cache_data(ttl=60)
+def load_structured_monthly_ledger(ledger_path=MONTHLY_LEDGER_CSV_PATH):
+    """앱 계산용 월말 원장을 읽는다. 키는 YYYY-MM."""
+    try:
+        df = pd.read_csv(ledger_path, dtype={"month": str})
+    except Exception:
+        return {}
+
+    required = {"month", "month_end_assets"}
+    if not required.issubset(df.columns):
+        return {}
+
+    ledger = {}
+    numeric_cols = [
+        "month_start_assets",
+        "month_end_assets",
+        "deposit",
+        "withdrawal",
+        "net_external_cash_flow",
+        "official_profit",
+        "official_return",
+    ]
+    for _, row in df.iterrows():
+        month = str(row.get("month", "")).strip()
+        if not re.match(r"^\d{4}-\d{2}$", month):
+            continue
+        item = row.to_dict()
+        for col in numeric_cols:
+            if col in item and pd.notna(item[col]):
+                item[col] = _to_float(item[col])
+        ledger[month] = item
+    return ledger
+
+
+@st.cache_data(ttl=60)
+def load_confirmed_month_end_navs(ledger_path=MONTHLY_LEDGER_PATH):
+    """월말 확정 총자산을 읽는다. CSV 원장을 우선 사용하고, 없으면 Markdown으로 fallback한다."""
+    confirmed = {
+        month: float(row["month_end_assets"])
+        for month, row in load_structured_monthly_ledger().items()
+        if _to_float(row.get("month_end_assets")) is not None
+    }
+    if confirmed:
+        return confirmed
+
+    try:
+        text = Path(ledger_path).read_text(encoding="utf-8")
+    except Exception:
+        return confirmed
+
+    current_month = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        month_match = re.match(r"^##\s+(\d{4}-\d{2})\s*$", line)
+        if month_match:
+            current_month = month_match.group(1)
+            continue
+
+        if not current_month:
+            continue
+
+        nav_match = re.search(r"(?:월말 총자산 확정|장종료 기준 최종 총액):\s*([0-9,]+)", line)
+        if nav_match:
+            confirmed[current_month] = float(nav_match.group(1).replace(",", ""))
+
+    return confirmed
+
+
+def get_rebalance_basis_nav(rebal_date, personal_nav_df):
+    """이번 달 성과 계산에 쓸 전월말 기준 NAV와 출처를 반환한다."""
+    rebal_ts = pd.Timestamp(rebal_date)
+    month_key = rebal_ts.strftime("%Y-%m")
+    ledger_navs = load_confirmed_month_end_navs()
+
+    if month_key in ledger_navs:
+        return ledger_navs[month_key], "월말 원장 확정 총자산", True
+
+    if month_key == DEFAULT_INVESTMENT_START_DATE.strftime("%Y-%m"):
+        return float(DEFAULT_INITIAL_CAPITAL), "초기 확정 총자산", True
+
+    if rebal_date in personal_nav_df.index:
+        return float(personal_nav_df.loc[rebal_date, "nav"]), "전략 시뮬레이션 NAV", False
+    return float(personal_nav_df["nav"].asof(rebal_date)), "전략 시뮬레이션 NAV", False
+
+
+def calculate_period_cash_flow(cash_flows, start_date, end_date):
+    """start_date 이후부터 end_date까지 확정된 순외부현금흐름."""
+    start_ts = pd.Timestamp(start_date).normalize()
+    end_ts = pd.Timestamp(end_date).normalize()
+    total = 0.0
+    for date_str, amount in (cash_flows or {}).items():
+        cash_flow_ts = pd.Timestamp(date_str).normalize()
+        if start_ts < cash_flow_ts <= end_ts:
+            total += float(amount)
+    return total
+
+
 def build_personal_account_curve(strategy_nav, initial_capital, cash_flows):
     """
     strategy_nav: Faber A 전략 자체의 기준가/NAV Series
@@ -3223,16 +3324,16 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         latest_profit = latest_account_value - latest_principal
         latest_return_on_principal = latest_account_value / latest_principal - 1 if latest_principal > 0 else 0.0
 
-        st.subheader("내 실제 계좌 기준")
+        st.subheader("개인 계좌 추정(전략 NAV 기준)")
         st.caption(
-            "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
-            "개인 성과 판단은 원금 대비 수익률을 기준으로 보며, 전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
+            "아래 지표는 실제 계좌 잔고가 아니라 Faber A 전략 NAV에 외부 입출금을 반영한 추정값입니다. "
+            "실제 성과 판단은 투자 화면의 실제 계좌 입력값 기준 지표를 우선합니다."
         )
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("누적 원금", f"{latest_principal:,.0f}원")
-        col2.metric("실제 평가액", f"{latest_account_value:,.0f}원")
-        col3.metric("실제 손익", f"{latest_profit:,.0f}원")
-        col4.metric("원금 대비 수익률", f"{latest_return_on_principal:.2%}")
+        col2.metric("추정 평가액", f"{latest_account_value:,.0f}원")
+        col3.metric("추정 손익", f"{latest_profit:,.0f}원")
+        col4.metric("추정 수익률", f"{latest_return_on_principal:.2%}")
 
     st.markdown("---")
     st.subheader("📉 Faber A 성과 차트")
@@ -5086,24 +5187,27 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     performance_base_date_str = pd.Timestamp(performance_base_date).strftime('%Y-%m-%d')
     realized_return_pct = (hist_profit / init_capital) * 100 if init_capital > 0 else 0.0
     recorded_principal_gap = current_total_assets - cumulative_principal
+    recorded_return_on_principal = recorded_principal_gap / cumulative_principal if cumulative_principal > 0 else 0.0
     p_mdd_daily, p_mdd_monthly, p_peak, p_valley = None, None, None, None
     if personal_nav_df is not None and len(personal_nav_df) > 0:
         _, _, p_mdd_daily, _ = calculate_performance_metrics(personal_nav_df, init_capital)
         p_mdd_monthly = calculate_monthly_mdd(personal_nav_df)
         p_peak, p_valley, _ = find_mdd_period(personal_nav_df)
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("누적 실현수익", f"{hist_profit:,.0f}원", delta=f"{realized_return_pct:.2f}%")
-    c2.metric("현재 운용자산", f"{current_total_assets:,.0f}원")
-    c3.metric("누적 원금", f"{cumulative_principal:,.0f}원")
-    c4.metric("기록 원금 대비 차이", f"{recorded_principal_gap:,.0f}원")
-    c5.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
-    c6.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("현재 운용자산", f"{current_total_assets:,.0f}원")
+    c2.metric("누적 원금", f"{cumulative_principal:,.0f}원")
+    c3.metric("실제 손익", f"{recorded_principal_gap:,.0f}원", delta=f"{recorded_return_on_principal:.2%}")
+    c4.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
+    c5.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
     st.warning(
         "입출금이 PERSONAL_CASH_FLOWS에 기록되지 않으면 현재 운용자산과 누적 원금의 차이가 수익처럼 보일 수 있습니다. "
         "사이드바 계좌 잔고 변경분은 자동으로 입출금과 투자 성과를 구분할 수 없으므로, 외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
     )
-    st.info("실제 성과 판단은 아래 '내 실제 계좌 기준' 섹션의 원금 대비 수익률을 기준으로 확인하세요.")
+    st.info("실제 성과 판단은 위의 현재 운용자산, 누적 원금, 실제 손익을 기준으로 확인하세요.")
+    st.caption(
+        "참고: 현재 실제 손익률은 추가투입금까지 포함한 누적 원금 대비로 계산되어, 월간 수익률보다 낮게 보일 수 있습니다."
+    )
     if p_peak and p_valley:
         st.info(f"📉 **최대 낙폭 (일별)**: {p_peak.strftime('%Y-%m-%d')}(고점) → {p_valley.strftime('%Y-%m-%d')}(저점)")
     p_m_peak, p_m_valley, _ = find_monthly_mdd_period(personal_nav_df) if personal_nav_df is not None and len(personal_nav_df) > 0 else (None, None, None)
@@ -5135,40 +5239,12 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         f"누적 원금: {cumulative_principal:,.0f}원"
     )
 
-    if personal_nav_df is not None and not personal_nav_df.empty:
-        personal_df = build_personal_account_curve(
-            strategy_nav=personal_nav_df["nav"],
-            initial_capital=init_capital,
-            cash_flows=PERSONAL_CASH_FLOWS,
-        )
-        latest_personal = personal_df.iloc[-1]
-        latest_principal = calculate_cumulative_principal(
-            init_capital,
-            PERSONAL_CASH_FLOWS,
-            latest_personal.name,
-        )
-        latest_account_value = float(latest_personal["account_value"])
-        latest_profit = latest_account_value - latest_principal
-        latest_return_on_principal = latest_account_value / latest_principal - 1 if latest_principal > 0 else 0.0
-
-        st.subheader("내 실제 계좌 기준")
-        st.caption(
-            "아래 지표는 Faber A 전략 자체의 순수 성과가 아니라, 외부 입출금과 누적 원금을 반영한 개인 계좌 기준입니다. "
-            "개인 성과 판단은 원금 대비 수익률을 기준으로 보며, 전략 CAGR/MDD/Sharpe는 기존 전략 NAV 기준으로 계산됩니다."
-        )
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("누적 원금", f"{latest_principal:,.0f}원")
-        col2.metric("실제 평가액", f"{latest_account_value:,.0f}원")
-        col3.metric("실제 손익", f"{latest_profit:,.0f}원")
-        col4.metric("원금 대비 수익률", f"{latest_return_on_principal:.2%}")
-
-    # ── 이번 달 자산별 성과 ──
+    # ── 이번 달 공식 성과 + 자산별 참고 성과 ──
     st.markdown("---")
-    st.markdown(f"#### 📅 이번 달 자산별 성과 ({current_date.strftime('%Y년 %m월')})")
+    st.markdown(f"#### 📅 이번 달 성과 ({current_date.strftime('%Y년 %m월')})")
     try:
         # 이번 달 첫 거래일 찾기 (= 지난달 말 리밸런싱 다음날)
         month_start = current_date.replace(day=1)
-        # 실제 계좌 잔고(current_total_assets) 기준으로 계산
         # 리밸런싱 기준일: 전월 마지막 거래일
         if personal_nav_df is not None and len(personal_nav_df) > 1:
             prev_month_rows = personal_nav_df[personal_nav_df.index < month_start]
@@ -5176,13 +5252,33 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 rebal_date = personal_nav_df.index[0]
             else:
                 rebal_date = prev_month_rows.index[-1]
-            # 리밸런싱일 당시의 NAV를 personal_nav_df에서 조회한다.
-            # current_total_assets(오늘 잔고)를 사용하면 월중 입금 등이
-            # 과거 성과에 섞여 배분금액이 부풀려지는 버그가 발생한다.
-            if rebal_date in personal_nav_df.index:
-                nav_at_rebal = float(personal_nav_df.loc[rebal_date, "nav"])
-            else:
-                nav_at_rebal = float(personal_nav_df["nav"].asof(rebal_date))
+            # 리밸런싱일 기준금액은 월말 장부 확정 총자산을 우선 사용한다.
+            # 장부에 아직 없는 달은 전략 시뮬레이션 NAV로 fallback한다.
+            nav_at_rebal, nav_source, nav_is_confirmed = get_rebalance_basis_nav(rebal_date, personal_nav_df)
+
+            net_month_cash_flow = calculate_period_cash_flow(PERSONAL_CASH_FLOWS, rebal_date, current_date)
+            official_month_profit = current_total_assets - nav_at_rebal - net_month_cash_flow
+            official_month_return = official_month_profit / nav_at_rebal if nav_at_rebal > 0 else None
+
+            st.markdown("##### 공식 성과: 실제 계좌 기준")
+            if not nav_is_confirmed:
+                st.warning(
+                    f"{rebal_date.strftime('%Y-%m')} 월말 확정 원장이 없어 전략 시뮬레이션 NAV로 임시 계산 중입니다. "
+                    "월말 원장을 기록하면 이 기준금액이 자동으로 바뀝니다."
+                )
+            official_cols = st.columns(4)
+            official_cols[0].metric("기준 총자산", f"{nav_at_rebal:,.0f}원")
+            official_cols[1].metric("순외부현금흐름", f"{net_month_cash_flow:+,.0f}원")
+            official_cols[2].metric("현재 운용자산", f"{current_total_assets:,.0f}원")
+            official_cols[3].metric(
+                "공식 손익",
+                f"{official_month_profit:+,.0f}원",
+                delta=f"{official_month_return:+.2%}" if official_month_return is not None else "N/A",
+            )
+            st.caption(
+                f"공식 성과 = 현재 운용자산 - {rebal_date.strftime('%Y-%m-%d')} 기준 총자산 - 순외부현금흐름. "
+                f"기준금액 출처: {nav_source}."
+            )
 
             # 리밸런싱 당시 Faber A 비중
             rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
@@ -5217,6 +5313,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 })
 
             if monthly_rows:
+                st.markdown("##### 참고: 자산별 가격변동 추정")
                 cols_m = st.columns(len(monthly_rows) + 1)
                 for i, row in enumerate(monthly_rows):
                     delta_color = "normal"
@@ -5227,7 +5324,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                     )
                 total_color = "🟢" if total_pnl >= 0 else "🔴"
                 cols_m[-1].metric(
-                    label="📊 이번 달 합계",
+                    label="📊 참고 합계",
                     value=f"{total_pnl:+,.0f}원",
                     delta=f"{total_pnl/nav_at_rebal*100:+.2f}%" if nav_at_rebal > 0 else "N/A",
                 )
@@ -5242,7 +5339,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                         "손익(원)": f"{r['손익(원)']:+,.0f}원",
                     } for r in monthly_rows])
                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
-                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 당시 NAV {nav_at_rebal:,.0f}원 기준. 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음.")
+                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 당시 NAV {nav_at_rebal:,.0f}원 기준({nav_source}). 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음.")
     except Exception as e:
         st.warning(f"이번 달 성과 계산 오류: {e}")
 
