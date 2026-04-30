@@ -474,6 +474,7 @@ DEFAULT_GEN_KOSPI_BAL = 131_180_878  # 사이드바 기본값 (수익률 계산 
 DEFAULT_GEN_GOLD_BAL  = 0
 DEFAULT_ISA_A_BAL     = 75_430_222
 DEFAULT_ISA_B_BAL     = 77_450_095
+DEFAULT_BALANCE_VERSION = "2026-04-30-rebalance"
 
 # 미확정 예정 입금 — NAV 계산에 반영되지 않음. 확정 시 CONFIRMED 으로 이동.
 PERSONAL_CASH_FLOWS_PENDING = {
@@ -4996,12 +4997,29 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.markdown("---")
 
     qp = _get_query_params()
-    for key, default in [("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL), ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
-                          ("bal_isa_a", DEFAULT_ISA_A_BAL), ("bal_isa_b", DEFAULT_ISA_B_BAL)]:
-        qp_key = {"bal_gen_kospi":"gen_k","bal_gen_gold":"gen_g","bal_isa_a":"isaa","bal_isa_b":"isab"}[key]
-        if key not in st.session_state:
-            qp_val = _get_qp_int(qp, qp_key)
-            st.session_state[key] = qp_val if qp_val is not None else default
+    balance_defaults = [
+        ("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL),
+        ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
+        ("bal_isa_a", DEFAULT_ISA_A_BAL),
+        ("bal_isa_b", DEFAULT_ISA_B_BAL),
+    ]
+    qp_balance_version = str(_qp_first(qp.get("bal_v")) or "")
+    if st.session_state.get("_balance_defaults_version") != DEFAULT_BALANCE_VERSION and qp_balance_version != DEFAULT_BALANCE_VERSION:
+        for key, default in balance_defaults:
+            st.session_state[key] = default
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
+        _set_query_params(
+            gen_k=DEFAULT_GEN_KOSPI_BAL, gen_g=DEFAULT_GEN_GOLD_BAL,
+            isaa=DEFAULT_ISA_A_BAL, isab=DEFAULT_ISA_B_BAL,
+            bal_v=DEFAULT_BALANCE_VERSION,
+        )
+    else:
+        for key, default in balance_defaults:
+            qp_key = {"bal_gen_kospi":"gen_k","bal_gen_gold":"gen_g","bal_isa_a":"isaa","bal_isa_b":"isab"}[key]
+            if key not in st.session_state:
+                qp_val = _get_qp_int(qp, qp_key)
+                st.session_state[key] = qp_val if qp_val is not None else default
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
 
     st.sidebar.markdown("### 💰 계좌 잔고 입력")
     st.sidebar.warning(
@@ -5009,10 +5027,14 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         "외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
     )
     if st.sidebar.button("🔄 잔고 기본값으로 초기화"):
-        for k, v in [("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL), ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
-                      ("bal_isa_a", DEFAULT_ISA_A_BAL), ("bal_isa_b", DEFAULT_ISA_B_BAL)]:
+        for k, v in balance_defaults:
             st.session_state[k] = v
-        _set_query_params(gen_k=DEFAULT_GEN_KOSPI_BAL, gen_g=DEFAULT_GEN_GOLD_BAL, isaa=DEFAULT_ISA_A_BAL, isab=DEFAULT_ISA_B_BAL)
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
+        _set_query_params(
+            gen_k=DEFAULT_GEN_KOSPI_BAL, gen_g=DEFAULT_GEN_GOLD_BAL,
+            isaa=DEFAULT_ISA_A_BAL, isab=DEFAULT_ISA_B_BAL,
+            bal_v=DEFAULT_BALANCE_VERSION,
+        )
         st.rerun()
 
     bal_gen_kospi = st.sidebar.number_input("일반 계좌 (코스피 등)", key="bal_gen_kospi", step=1_000_000)
@@ -5023,7 +5045,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.sidebar.markdown(f"**확인:** {bal_isa_a:,.0f}원 (약 {bal_isa_a/10000:,.0f}만 원)")
     bal_isa_b = st.sidebar.number_input("ISA B 계좌", key="bal_isa_b", step=1_000_000)
     st.sidebar.markdown(f"**확인:** {bal_isa_b:,.0f}원 (약 {bal_isa_b/10000:,.0f}만 원)")
-    try: _set_query_params(gen_k=int(bal_gen_kospi), gen_g=int(bal_gen_gold), isaa=int(bal_isa_a), isab=int(bal_isa_b))
+    try: _set_query_params(gen_k=int(bal_gen_kospi), gen_g=int(bal_gen_gold), isaa=int(bal_isa_a), isab=int(bal_isa_b), bal_v=DEFAULT_BALANCE_VERSION)
     except Exception: pass
 
     bal_gen = bal_gen_kospi + bal_gen_gold
