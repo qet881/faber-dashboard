@@ -3708,7 +3708,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             if nav_s is None or nav_s.empty: return None
             running_max = nav_s.expanding().max()
             underwater_ratio = (nav_s < running_max).sum() / len(nav_s)
-            periods, in_dd, peak_idx = [], False, 0
+            periods, period_infos, in_dd, peak_idx = [], [], False, 0
             nav_arr = nav_s.values
             dates = nav_s.index
             rmax_arr = running_max.values
@@ -3729,6 +3729,11 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                         days = (dates[i] - dates[peak_idx]).days
                         if days > 0:
                             periods.append(days)
+                            period_infos.append({
+                                "days": days,
+                                "start": dates[peak_idx],
+                                "end": dates[i],
+                            })
                         in_dd = False
             def fmt(d):
                 if d is None or d == 0: return "-"
@@ -3737,10 +3742,15 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 if y > 0: return f"{y}년"
                 if m > 0: return f"{m}개월"
                 return f"{d}일"
+            max_info = max(period_infos, key=lambda x: x["days"]) if period_infos else None
             return {
                 'Underwater 비율': f"{underwater_ratio*100:.1f}%",
                 '평균 회복기간': fmt(int(sum(periods)/len(periods))) if periods else "-",
                 '최장 회복기간': fmt(max(periods)) if periods else "-",
+                '최장 회복 구간': (
+                    f"{max_info['start'].strftime('%Y-%m-%d')} → {max_info['end'].strftime('%Y-%m-%d')}"
+                    if max_info else "-"
+                ),
             }
 
         recovery_map = {
