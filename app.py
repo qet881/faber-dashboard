@@ -486,8 +486,17 @@ PERSONAL_CASH_FLOWS_CONFIRMED = {
     "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
 }
 PERSONAL_CASH_FLOWS = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
-MONTHLY_LEDGER_PATH = Path(__file__).resolve().parent / "faber-investment-memory" / "monthly_ledger.md"
-MONTHLY_LEDGER_CSV_PATH = Path(__file__).resolve().parent / "faber-investment-memory" / "monthly_ledger.csv"
+APP_DIR = Path(__file__).resolve().parent
+MONTHLY_LEDGER_PATHS = [
+    APP_DIR / "faber-investment-memory" / "monthly_ledger.md",
+    APP_DIR / ".codex-private" / "monthly_ledger.md",
+]
+MONTHLY_LEDGER_CSV_PATHS = [
+    APP_DIR / "faber-investment-memory" / "monthly_ledger.csv",
+    APP_DIR / ".codex-private" / "monthly_ledger.csv",
+]
+MONTHLY_LEDGER_PATH = MONTHLY_LEDGER_PATHS[0]
+MONTHLY_LEDGER_CSV_PATH = MONTHLY_LEDGER_CSV_PATHS[0]
 
 ASSETS = {
     '코스피200': '294400',
@@ -2478,8 +2487,17 @@ def calculate_cumulative_principal(initial_capital, cash_flows, evaluation_date)
 @st.cache_data(ttl=60)
 def load_structured_monthly_ledger(ledger_path=MONTHLY_LEDGER_CSV_PATH):
     """앱 계산용 월말 원장을 읽는다. 키는 YYYY-MM."""
+    ledger_paths = [Path(ledger_path)]
+    for fallback_path in MONTHLY_LEDGER_CSV_PATHS:
+        if fallback_path not in ledger_paths:
+            ledger_paths.append(fallback_path)
+
     try:
-        df = pd.read_csv(ledger_path, dtype={"month": str})
+        df = next(
+            pd.read_csv(path, dtype={"month": str})
+            for path in ledger_paths
+            if path.exists()
+        )
     except Exception:
         return {}
 
@@ -2517,28 +2535,38 @@ def load_confirmed_month_end_navs(ledger_path=MONTHLY_LEDGER_PATH):
         for month, row in load_structured_monthly_ledger().items()
         if _to_float(row.get("month_end_assets")) is not None
     }
-    if confirmed:
-        return confirmed
 
-    try:
-        text = Path(ledger_path).read_text(encoding="utf-8")
-    except Exception:
-        return confirmed
+    ledger_paths = [Path(ledger_path)]
+    for fallback_path in MONTHLY_LEDGER_PATHS:
+        if fallback_path not in ledger_paths:
+            ledger_paths.append(fallback_path)
 
-    current_month = None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        month_match = re.match(r"^##\s+(\d{4}-\d{2})\s*$", line)
-        if month_match:
-            current_month = month_match.group(1)
+    for path in ledger_paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
             continue
 
-        if not current_month:
-            continue
+        current_month = None
+        found_nav_in_path = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            month_match = re.match(r"^##\s+(\d{4}-\d{2})\s*$", line)
+            if month_match:
+                current_month = month_match.group(1)
+                continue
 
-        nav_match = re.search(r"(?:월말 총자산 확정|장종료 기준 최종 총액):\s*([0-9,]+)", line)
-        if nav_match:
-            confirmed[current_month] = float(nav_match.group(1).replace(",", ""))
+            if not current_month:
+                continue
+
+            nav_match = re.search(r"(?:월말 총자산 확정|장종료 기준 최종 총액):\s*([0-9,]+)", line)
+            if nav_match:
+                found_nav_in_path = True
+                if current_month not in confirmed:
+                    confirmed[current_month] = float(nav_match.group(1).replace(",", ""))
+
+        if found_nav_in_path:
+            return confirmed
 
     return confirmed
 
@@ -5269,6 +5297,10 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             net_month_cash_flow = calculate_period_cash_flow(PERSONAL_CASH_FLOWS, rebal_date, current_date)
             official_month_profit = current_total_assets - nav_at_rebal - net_month_cash_flow
             official_month_return = official_month_profit / nav_at_rebal if nav_at_rebal > 0 else None
+            official_profit_label = "0원" if abs(official_month_profit) < 0.5 else f"{official_month_profit:+,.0f}원"
+            official_return_label = None
+            if official_month_return is not None and abs(official_month_profit) >= 0.5:
+                official_return_label = f"{official_month_return:+.2%}"
 
             st.markdown("##### 공식 성과: 실제 계좌 기준")
             if not nav_is_confirmed:
@@ -5282,8 +5314,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             official_cols[2].metric("현재 운용자산", f"{current_total_assets:,.0f}원")
             official_cols[3].metric(
                 "공식 손익",
-                f"{official_month_profit:+,.0f}원",
-                delta=f"{official_month_return:+.2%}" if official_month_return is not None else "N/A",
+                official_profit_label,
+                delta=official_return_label,
             )
             st.caption(
                 f"공식 성과 = 현재 운용자산 - {rebal_date.strftime('%Y-%m-%d')} 기준 총자산 - 순외부현금흐름. "
