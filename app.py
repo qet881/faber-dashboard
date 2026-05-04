@@ -497,6 +497,20 @@ MONTHLY_LEDGER_CSV_PATHS = [
 ]
 MONTHLY_LEDGER_PATH = MONTHLY_LEDGER_PATHS[0]
 MONTHLY_LEDGER_CSV_PATH = MONTHLY_LEDGER_CSV_PATHS[0]
+DEFAULT_MONTHLY_LEDGER = {
+    "2026-04": {
+        "month": "2026-04",
+        "month_start_date": "2026-03-31",
+        "month_start_assets": 249_008_318,
+        "month_end_date": "2026-04-30",
+        "month_end_assets": 283_565_328,
+        "deposit": 30_000_000,
+        "withdrawal": 0,
+        "net_external_cash_flow": 30_000_000,
+        "official_profit": 4_557_010,
+        "official_return": 0.0183,
+    },
+}
 
 ASSETS = {
     '코스피200': '294400',
@@ -2487,6 +2501,7 @@ def calculate_cumulative_principal(initial_capital, cash_flows, evaluation_date)
 @st.cache_data(ttl=60)
 def load_structured_monthly_ledger(ledger_path=MONTHLY_LEDGER_CSV_PATH):
     """앱 계산용 월말 원장을 읽는다. 키는 YYYY-MM."""
+    ledger = {month: row.copy() for month, row in DEFAULT_MONTHLY_LEDGER.items()}
     ledger_paths = [Path(ledger_path)]
     for fallback_path in MONTHLY_LEDGER_CSV_PATHS:
         if fallback_path not in ledger_paths:
@@ -2499,13 +2514,12 @@ def load_structured_monthly_ledger(ledger_path=MONTHLY_LEDGER_CSV_PATH):
             if path.exists()
         )
     except Exception:
-        return {}
+        return ledger
 
     required = {"month", "month_end_assets"}
     if not required.issubset(df.columns):
-        return {}
+        return ledger
 
-    ledger = {}
     numeric_cols = [
         "month_start_assets",
         "month_end_assets",
