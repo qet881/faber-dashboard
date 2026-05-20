@@ -1,0 +1,55 @@
+name: Gold Premium Alert
+
+on:
+  schedule:
+    # GitHub Actions schedule uses UTC. The shortest supported interval is
+    # every 5 minutes; scheduled runs can be delayed or dropped under load.
+    # 00:00-07:00 UTC broadly covers KST 09:00-16:00, and the Python script
+    # applies the final KST 09:00-15:30 market-hours filter.
+    - cron: "*/5 0-7 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-premium-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run alert
+        run: python gold_premium_alert.py --state-file gold_premium_alert_state.json
+
+      - name: Commit state file when changed
+        run: |
+          if [ -z "$(git status --porcelain -- gold_premium_alert_state.json)" ]; then
+            echo "No state change to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gold_premium_alert_state.json
+          git commit -m "chore: update gold premium alert state"
+          git push
