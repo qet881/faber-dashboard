@@ -522,10 +522,22 @@ ASSETS = {
 
 CASH_TICKER = '455890'
 CASH_NAME = '현금(MMF)'
+NASDAQ100_ASSET_NAME = next((name for name, ticker in ASSETS.items() if ticker == '133690'), None)
 KR_STOCK_MIX_ASSET = '코스피200'
 KR_BOND_10Y_MIX_ASSET = '한국국고채10년'
 KR_BOND_10Y_MIX_TICKER = '148070'
 KR_3ASSET_STRATEGY_LABEL = 'KR 3자산 평균모멘텀'
+FABER_NASDAQ_ACTIVE_EXEC_LABEL = 'Faber A (나스닥 액티브 집행)'
+TIME_NASDAQ_ACTIVE_TICKER = '426030'
+KOACT_NASDAQ_GROWTH_ACTIVE_TICKER = '0015B0'
+TIME_NASDAQ_ACTIVE_LISTING_DATE = pd.Timestamp('2022-05-11')
+KOACT_NASDAQ_GROWTH_ACTIVE_LISTING_DATE = pd.Timestamp('2025-02-25')
+FABER_KR_SAMSUNG_EXEC_LABEL = 'Faber A (코스피 신호·삼성전자 집행)'
+FABER_KR_HYNIX_EXEC_LABEL = 'Faber A (코스피 신호·하이닉스 집행)'
+FABER_KR_SEMI_MIX_EXEC_LABEL = 'Faber A (코스피 신호·삼전/하닉 50:50)'
+FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL = '해남 A'
+SAMSUNG_ELECTRONICS_TICKER = '005930'
+SK_HYNIX_TICKER = '000660'
 CHINA_CSI300_CNY_ASSET = '중국CSI300(위안화 노출)'
 INDIA_NIFTY_INR_ASSET = '인도니프티(루피 노출)'
 FABER_EX_BONDS_3_LABEL = 'Faber A (한·미·금 3자산)'
@@ -1710,6 +1722,201 @@ def simulate_kr_stock_bond_cash_avg_momentum_strategy(start_date, end_date, init
     return df
 
 
+def _normalize_component_weights(component_prices, target_weights):
+    available = {
+        name: weight
+        for name, weight in target_weights.items()
+        if component_prices.get(name) is not None and component_prices.get(name) > 0 and weight > 0
+    }
+    total = float(sum(available.values()))
+    if total <= 0:
+        return {}
+    return {name: weight / total for name, weight in available.items()}
+
+
+def _nasdaq_active_execution_targets(date):
+    """나스닥 20% 슬롯 내부 집행 비중. 상장 전 데이터는 만들지 않는다."""
+    d = pd.Timestamp(date)
+    if d < TIME_NASDAQ_ACTIVE_LISTING_DATE:
+        return {"base": 1.0}
+    if d < KOACT_NASDAQ_GROWTH_ACTIVE_LISTING_DATE:
+        return {"base": 0.5, "time": 0.5}
+    return {"time": 0.5, "koact": 0.5}
+
+
+def build_weighted_execution_series(components, target_weight_fn, trading_dates, price_col="Adj Close"):
+    """여러 집행 상품을 월말 리밸런싱하는 합성 가격 시리즈."""
+    components = {
+        name: df
+        for name, df in (components or {}).items()
+        if df is not None and not df.empty
+    }
+    if not components or not trading_dates:
+        return None
+
+    holdings = {name: 0.0 for name in components}
+    nav = 10000.0
+    rows = []
+
+    def _component_prices(date):
+        return {
+            name: get_price_at_date(df, date, price_col=price_col)
+            for name, df in components.items()
+            if df is not None and not df.empty
+        }
+
+    for i, date in enumerate(trading_dates):
+        prices = _component_prices(date)
+        if not rows:
+            weights = _normalize_component_weights(prices, target_weight_fn(date))
+            if not weights:
+                continue
+            for name, weight in weights.items():
+                holdings[name] = (nav * weight) / prices[name]
+
+        pv = 0.0
+        for name, units in holdings.items():
+            px = prices.get(name)
+            if px is not None and px > 0:
+                pv += units * px
+        safe_nav = _safe_nav_value(pv, nav)
+        nav = safe_nav if safe_nav is not None else nav
+        rows.append({"date": date, "nav": nav})
+
+        if _is_month_end_rebalance_day(trading_dates, i):
+            weights = _normalize_component_weights(prices, target_weight_fn(date))
+            if weights:
+                holdings = {name: 0.0 for name in components}
+                for name, weight in weights.items():
+                    holdings[name] = (nav * weight) / prices[name]
+
+    out = pd.DataFrame(rows).set_index("date").sort_index()
+    out["Close"] = out["nav"]
+    out["Adj Close"] = out["nav"]
+    return out[["Close", "Adj Close"]]
+
+
+def build_nasdaq_active_execution_series(base_nasdaq_df, time_df, koact_df, trading_dates, price_col="Adj Close"):
+    """나스닥 신호는 그대로 두고, 나스닥 슬롯의 집행 상품만 상장일 이후 교체한 합성 가격."""
+    return build_weighted_execution_series(
+        {"base": base_nasdaq_df, "time": time_df, "koact": koact_df},
+        _nasdaq_active_execution_targets,
+        trading_dates,
+        price_col=price_col,
+    )
+
+
+def build_faber_nasdaq_active_execution_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """Faber A와 동일 신호를 쓰되 나스닥 20% 슬롯 집행만 액티브 ETF로 바꾼 데이터셋."""
+    if base_all_data is None:
+        return None
+    nasdaq_name = NASDAQ100_ASSET_NAME
+    if not nasdaq_name:
+        return None
+    base_nasdaq = base_all_data.get(nasdaq_name)
+    if base_nasdaq is None or base_nasdaq.empty:
+        return None
+
+    time_df = fetch_etf_data(TIME_NASDAQ_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    koact_df = fetch_etf_data(KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
+    exec_df = build_nasdaq_active_execution_series(
+        base_nasdaq, time_df, koact_df, trading_dates, price_col=price_col
+    )
+    if exec_df is None or exec_df.empty:
+        return None
+
+    data = {k: v for k, v in base_all_data.items()}
+    data[nasdaq_name] = exec_df
+    momentum_key = next((k for k in base_all_data.keys() if k.startswith(f"{nasdaq_name}_")), None)
+    if momentum_key:
+        data[momentum_key] = base_all_data.get(momentum_key, base_nasdaq)
+    return data
+
+
+def build_faber_slot_execution_data(base_all_data, slot_name, execution_components, start_date, end_date, price_col="Adj Close"):
+    """Faber 신호는 slot_name 원본으로 유지하고 해당 슬롯의 실제 집행 상품만 교체한다."""
+    if base_all_data is None or not slot_name:
+        return None
+    signal_df = base_all_data.get(slot_name)
+    if signal_df is None or signal_df.empty:
+        return None
+
+    trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
+    exec_df = build_weighted_execution_series(
+        execution_components,
+        lambda _date: {name: 1.0 / len(execution_components) for name in execution_components},
+        trading_dates,
+        price_col=price_col,
+    )
+    if exec_df is None or exec_df.empty:
+        return None
+
+    data = {k: v for k, v in base_all_data.items()}
+    data[slot_name] = exec_df
+    momentum_key = next((k for k in base_all_data.keys() if k.startswith(f"{slot_name}_")), None)
+    if momentum_key:
+        data[momentum_key] = base_all_data.get(momentum_key, signal_df)
+    return data
+
+
+def build_faber_kr_semiconductor_execution_variants(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """코스피200 신호를 유지한 한국 주식 슬롯 집행 실험 3종."""
+    samsung_df = fetch_etf_data(SAMSUNG_ELECTRONICS_TICKER, start_date, end_date, is_momentum=False)
+    hynix_df = fetch_etf_data(SK_HYNIX_TICKER, start_date, end_date, is_momentum=False)
+    return {
+        FABER_KR_SAMSUNG_EXEC_LABEL: build_faber_slot_execution_data(
+            base_all_data, KR_STOCK_MIX_ASSET, {"samsung": samsung_df}, start_date, end_date, price_col=price_col
+        ),
+        FABER_KR_HYNIX_EXEC_LABEL: build_faber_slot_execution_data(
+            base_all_data, KR_STOCK_MIX_ASSET, {"hynix": hynix_df}, start_date, end_date, price_col=price_col
+        ),
+        FABER_KR_SEMI_MIX_EXEC_LABEL: build_faber_slot_execution_data(
+            base_all_data, KR_STOCK_MIX_ASSET, {"samsung": samsung_df, "hynix": hynix_df}, start_date, end_date, price_col=price_col
+        ),
+    }
+
+
+def build_faber_kr_semiconductor_overlay_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """코스피200 신호를 유지하고, 삼성전자/SK하이닉스 데이터가 있는 구간부터 50:50 집행으로 덮어쓴다."""
+    if base_all_data is None:
+        return None
+    base_slot_df = base_all_data.get(KR_STOCK_MIX_ASSET)
+    if base_slot_df is None or base_slot_df.empty:
+        return None
+
+    samsung_df = fetch_etf_data(SAMSUNG_ELECTRONICS_TICKER, start_date, end_date, is_momentum=False)
+    hynix_df = fetch_etf_data(SK_HYNIX_TICKER, start_date, end_date, is_momentum=False)
+    trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
+    semi_exec_df = build_weighted_execution_series(
+        {"samsung": samsung_df, "hynix": hynix_df},
+        lambda _date: {"samsung": 0.5, "hynix": 0.5},
+        trading_dates,
+        price_col=price_col,
+    )
+    if semi_exec_df is None or semi_exec_df.empty:
+        return None
+
+    data = {k: v for k, v in base_all_data.items()}
+    data[KR_STOCK_MIX_ASSET] = _chain_link_series(base_slot_df, semi_exec_df)
+    momentum_key = next((k for k in base_all_data.keys() if k.startswith(f"{KR_STOCK_MIX_ASSET}_")), None)
+    if momentum_key:
+        data[momentum_key] = base_all_data.get(momentum_key, base_slot_df)
+    return data
+
+
+def build_faber_active_nasdaq_kr_semi_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """나스닥은 액티브 ETF 집행, 한국주식은 삼전/하닉 50:50 집행으로 상장/데이터 이후만 덮어쓴다."""
+    nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+        base_all_data, start_date, end_date, price_col=price_col
+    )
+    if nasdaq_active_data is None:
+        return None
+    return build_faber_kr_semiconductor_overlay_data(
+        nasdaq_active_data, start_date, end_date, price_col=price_col
+    )
+
+
 def build_faber_ex_bonds_strategy_data(base_all_data, start_date, end_date, include_china=False, include_india=False):
     """Faber A 변형(채권 제외) 전략용 데이터셋 구성."""
     if base_all_data is None:
@@ -1936,12 +2143,9 @@ def calculate_faber_weights(as_of_date, all_data, mode='A', buffer_data=None, pr
     BUFFER_KEY = '_faber_buffer_'
     
     for asset_name, ticker in ASSETS.items():
-        # 금현물: GLD×환율(모멘텀 데이터)로 Faber 신호 판단 (ETF 괴리율 배제)
-        # 나머지: 가격 데이터(실제 ETF)로 판단
-        if ticker == '411060':
-            signal_data = all_data.get(f"{asset_name}_모멘텀")
-        else:
-            signal_data = all_data.get(asset_name)
+        # 신호는 *_모멘텀 시리즈를 우선 사용한다.
+        # 나스닥 액티브 집행형처럼 신호 자산과 실제 집행 자산을 분리할 수 있게 하기 위함이다.
+        signal_data = all_data.get(f"{asset_name}_모멘텀", all_data.get(asset_name))
         near_high = is_near_12month_high(signal_data, as_of_date, threshold=0.05, price_col=price_col)
         
         # 이진: 고점 근처면 20%, 아니면 0%
@@ -2727,6 +2931,115 @@ def calculate_sortino_ratio(daily_nav_df, risk_free_annual=0.025):
     if downside_std == 0: return None
     return float((excess.mean() / downside_std) * np.sqrt(252))
 
+def calculate_annualized_volatility(daily_nav_df):
+    """일별 수익률 표준편차를 연율화한 변동성."""
+    if daily_nav_df is None or len(daily_nav_df) < 20:
+        return None
+    daily_ret = daily_nav_df["nav"].pct_change().dropna()
+    if len(daily_ret) == 0:
+        return None
+    return float(daily_ret.std() * np.sqrt(252))
+
+def price_df_to_nav_df(price_df, start_date, end_date, price_col="Adj Close", initial_nav=100.0):
+    """가격 시리즈를 NAV 형태로 정규화."""
+    if price_df is None or price_df.empty:
+        return None
+    col = price_col if price_col in price_df.columns else "Close"
+    if col not in price_df.columns:
+        return None
+    s = price_df[(price_df.index >= pd.Timestamp(start_date)) & (price_df.index <= pd.Timestamp(end_date))][col].dropna()
+    if len(s) < 2 or float(s.iloc[0]) <= 0:
+        return None
+    nav = (s / float(s.iloc[0])) * float(initial_nav)
+    out = pd.DataFrame({"nav": nav}, index=nav.index)
+    out["running_max"] = out["nav"].expanding().max()
+    out["drawdown"] = (out["nav"] - out["running_max"]) / out["running_max"]
+    return out
+
+
+def calculate_downside_sensitivity_metrics(base_df, target_df, start_date, end_date, price_col="Adj Close"):
+    """기준자산 하락월에서 대상자산이 얼마나 민감하게 움직였는지 계산."""
+    base_nav = price_df_to_nav_df(base_df, start_date, end_date, price_col=price_col)
+    target_nav = price_df_to_nav_df(target_df, start_date, end_date, price_col=price_col)
+    if base_nav is None or target_nav is None:
+        return None
+
+    base_monthly = base_nav["nav"].groupby(base_nav.index.to_period("M")).last().pct_change().dropna()
+    target_monthly = target_nav["nav"].groupby(target_nav.index.to_period("M")).last().pct_change().dropna()
+    aligned = pd.concat([base_monthly.rename("base"), target_monthly.rename("target")], axis=1).dropna()
+    if aligned.empty:
+        return None
+
+    down = aligned[aligned["base"] < 0]
+    stress = aligned[aligned["base"] <= -0.05]
+    beta = None
+    if len(down) >= 2 and float(down["base"].var()) > 0:
+        beta = float(down["target"].cov(down["base"]) / down["base"].var())
+
+    _, _, mdd, cagr = calculate_performance_metrics(target_nav, float(target_nav["nav"].iloc[0]))
+    return {
+        "months": int(len(aligned)),
+        "down_months": int(len(down)),
+        "stress_months": int(len(stress)),
+        "cagr": cagr,
+        "mdd": mdd,
+        "volatility": calculate_annualized_volatility(target_nav),
+        "down_avg": float(down["target"].mean()) if len(down) > 0 else None,
+        "stress_avg": float(stress["target"].mean()) if len(stress) > 0 else None,
+        "down_beta": beta,
+    }
+
+def calculate_strategy_downside_comparison(base_nav, target_nav):
+    """Compare target strategy behavior when the base strategy has weak months."""
+    if base_nav is None or target_nav is None or base_nav.empty or target_nav.empty:
+        return None
+
+    base_monthly = base_nav["nav"].groupby(base_nav.index.to_period("M")).last().pct_change().dropna()
+    target_monthly = target_nav["nav"].groupby(target_nav.index.to_period("M")).last().pct_change().dropna()
+    aligned = pd.concat([base_monthly.rename("base"), target_monthly.rename("target")], axis=1).dropna()
+    if aligned.empty:
+        return None
+
+    aligned["excess"] = aligned["target"] - aligned["base"]
+    down = aligned[aligned["base"] < 0]
+    up = aligned[aligned["base"] > 0]
+    stress = aligned[aligned["base"] <= -0.05]
+
+    def _mean_or_none(series):
+        return float(series.mean()) if len(series) > 0 else None
+
+    def _worse_rate(df):
+        return float((df["target"] < df["base"]).mean()) if len(df) > 0 else None
+
+    beta = None
+    if len(down) >= 2 and float(down["base"].var()) > 0:
+        beta = float(down["target"].cov(down["base"]) / down["base"].var())
+
+    capture = None
+    if len(up) > 0 and abs(float(up["base"].mean())) > 1e-12:
+        capture = float(up["target"].mean() / up["base"].mean())
+
+    return {
+        "months": int(len(aligned)),
+        "up_months": int(len(up)),
+        "down_months": int(len(down)),
+        "stress_months": int(len(stress)),
+        "avg_excess": _mean_or_none(aligned["excess"]),
+        "up_base_avg": _mean_or_none(up["base"]),
+        "up_target_avg": _mean_or_none(up["target"]),
+        "up_excess_avg": _mean_or_none(up["excess"]),
+        "down_base_avg": _mean_or_none(down["base"]),
+        "down_target_avg": _mean_or_none(down["target"]),
+        "down_excess_avg": _mean_or_none(down["excess"]),
+        "stress_base_avg": _mean_or_none(stress["base"]),
+        "stress_target_avg": _mean_or_none(stress["target"]),
+        "stress_excess_avg": _mean_or_none(stress["excess"]),
+        "down_beta": beta,
+        "up_capture": capture,
+        "down_worse_rate": _worse_rate(down),
+        "stress_worse_rate": _worse_rate(stress),
+    }
+
 def find_mdd_period(daily_nav_df):
     if daily_nav_df is None or len(daily_nav_df) == 0: return None, None, None
     valley_date = daily_nav_df["drawdown"].idxmin()
@@ -3280,6 +3593,39 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     kr_3asset_nav = simulate_kr_stock_bond_cash_avg_momentum_strategy(
         bt_start_date, current_date, IC, kr_3asset_data, price_col=price_col
     )
+    faber_nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    faber_nasdaq_active_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, faber_nasdaq_active_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if faber_nasdaq_active_data is not None else None
+    )
+    faber_active_nasdaq_kr_semi_data = build_faber_active_nasdaq_kr_semi_data(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    faber_active_nasdaq_kr_semi_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_semi_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if faber_active_nasdaq_kr_semi_data is not None else None
+    )
+    kr_semiconductor_data_map = build_faber_kr_semiconductor_execution_variants(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    kr_semiconductor_nav_map = {
+        label: (
+            simulate_faber_strategy(
+                bt_start_date, current_date, IC, strategy_data,
+                mode='A', buffer_df=None, price_col=price_col
+            )
+            if strategy_data is not None else None
+        )
+        for label, strategy_data in kr_semiconductor_data_map.items()
+    }
     faber_ex3_assets = ['코스피200', '미국나스닥100', '금현물']
     faber_ex4_assets = ['코스피200', '미국나스닥100', CHINA_CSI300_CNY_ASSET, '금현물']
     faber_ex5_assets = ['코스피200', '미국나스닥100', CHINA_CSI300_CNY_ASSET, INDIA_NIFTY_INR_ASSET, '금현물']
@@ -3380,6 +3726,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.markdown("---")
     st.subheader("📉 Faber A 성과 차트")
     extra = {"이전 전략: 연속 모멘텀 (참고)": (old_nav, "#ff7f0e", "dash")} if old_nav is not None else {}
+    if faber_nasdaq_active_nav is not None:
+        extra["Faber A 나스닥 액티브 집행"] = (faber_nasdaq_active_nav, "#d62728", "dash")
+    if faber_active_nasdaq_kr_semi_nav is not None:
+        extra["해남 A"] = (faber_active_nasdaq_kr_semi_nav, "#2ca02c", "dashdot")
     extra["동일비중 B&H"] = (static_nav, "gray", "dot")
     if allw_nav is not None:
         extra["ALLW (2025~)"] = (allw_nav, "#9467bd", "dashdot")
@@ -3394,32 +3744,36 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     quant_labels = [
         "Faber A ⭐",
         "이전 전략(연속 모멘텀)",
-        "GTAA (10개월 SMA)",
-        KR_3ASSET_STRATEGY_LABEL,
-        FABER_EX_BONDS_3_LABEL,
-        FABER_EX_BONDS_4_LABEL,
-        FABER_EX_BONDS_5_LABEL,
+        FABER_NASDAQ_ACTIVE_EXEC_LABEL,
+        FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL,
     ]
     st.caption(
         "✅ 기준 확인: "
         + " / ".join(quant_labels)
         + " 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다."
     )
+    st.caption(
+        "변동성(위험)은 일별 수익률 표준편차를 연율화한 값입니다. 예를 들어 연 변동성 10%는 "
+        "100만원 투자 시 보통 1년 수익 변동 폭을 약 10만원 수준으로 보는 식의 참고 지표이며, "
+        "손익 범위를 보장하지는 않습니다."
+    )
 
     def _strategy_metrics(nav, ic):
         """nav DataFrame에서 CAGR/MDD/Sharpe/Sortino를 딕셔너리로 반환."""
         if nav is None or nav.empty:
             return None
-        _, _, mdd, cagr = calculate_performance_metrics(nav, ic)
+        period_initial = float(nav["nav"].iloc[0])
+        _, _, mdd, cagr = calculate_performance_metrics(nav, period_initial)
         sharpe  = calculate_sharpe_ratio(nav)
         sortino = calculate_sortino_ratio(nav)
+        volatility = calculate_annualized_volatility(nav)
         ulcer = calculate_ulcer_index(nav)
-        martin = calculate_martin_ratio(nav, ic)
+        martin = calculate_martin_ratio(nav, period_initial)
         cvar_5 = calculate_monthly_cvar(nav, alpha=0.05)
         pos_month = calculate_positive_month_ratio(nav)
         cagr_mdd = (cagr / abs(mdd)) if (cagr is not None and cagr > 0 and mdd is not None and mdd < 0) else None
         return {"cagr": cagr, "mdd": mdd, "sharpe": sharpe,
-                "sortino": sortino, "cagr_mdd": cagr_mdd,
+                "sortino": sortino, "volatility": volatility, "cagr_mdd": cagr_mdd,
                 "ulcer": ulcer, "martin": martin, "cvar_5": cvar_5,
                 "pos_month": pos_month}
 
@@ -3429,11 +3783,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     quant_strategies = {
         "Faber A ⭐": nav_df,
         "이전 전략(연속 모멘텀)": old_nav,
-        "GTAA (10개월 SMA)": gtaa_nav,
-        KR_3ASSET_STRATEGY_LABEL: kr_3asset_nav,
-        FABER_EX_BONDS_3_LABEL: faber_ex3_nav,
-        FABER_EX_BONDS_4_LABEL: faber_ex4_nav,
-        FABER_EX_BONDS_5_LABEL: faber_ex5_nav,
+        FABER_NASDAQ_ACTIVE_EXEC_LABEL: faber_nasdaq_active_nav,
+        FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: faber_active_nasdaq_kr_semi_nav,
     }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
         quant_strategies, min_obs_days=252
@@ -3461,11 +3812,15 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         weight_builders = {
             "Faber A ⭐": lambda d: calculate_faber_weights(d, all_data, mode='A', price_col=price_col),
             "이전 전략(연속 모멘텀)": lambda d: calculate_weights_at_date(d, all_data, price_col=price_col),
-            "GTAA (10개월 SMA)": lambda d: calculate_gtaa_weights(d, all_data, price_col=price_col),
-            KR_3ASSET_STRATEGY_LABEL: (
-                lambda d: calculate_kr_stock_bond_cash_avg_momentum_weights(
-                    d, kr_3asset_data, cash_score=1.0, price_col=price_col
-                ) if kr_3asset_data is not None else None
+            FABER_NASDAQ_ACTIVE_EXEC_LABEL: (
+                lambda d: calculate_faber_weights(
+                    d, faber_nasdaq_active_data, mode='A', price_col=price_col
+                ) if faber_nasdaq_active_data is not None else None
+            ),
+            FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: (
+                lambda d: calculate_faber_weights(
+                    d, faber_active_nasdaq_kr_semi_data, mode='A', price_col=price_col
+                ) if faber_active_nasdaq_kr_semi_data is not None else None
             ),
             FABER_EX_BONDS_3_LABEL: (
                 lambda d: calculate_faber_weights_for_assets(
@@ -3486,11 +3841,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         turnover_keys = {
             "Faber A ⭐": full_keys,
             "이전 전략(연속 모멘텀)": full_keys,
-            "GTAA (10개월 SMA)": full_keys,
-            KR_3ASSET_STRATEGY_LABEL: [KR_STOCK_MIX_ASSET, KR_BOND_10Y_MIX_ASSET, CASH_NAME],
-            FABER_EX_BONDS_3_LABEL: faber_ex3_assets + [CASH_NAME],
-            FABER_EX_BONDS_4_LABEL: faber_ex4_assets + [CASH_NAME],
-            FABER_EX_BONDS_5_LABEL: faber_ex5_assets + [CASH_NAME],
+            FABER_NASDAQ_ACTIVE_EXEC_LABEL: full_keys,
+            FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: full_keys,
         }
         for name in quant_labels:
             builder = weight_builders.get(name)
@@ -3516,6 +3868,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         metric_specs = [
             ("CAGR", "cagr", "{:.2%}"),
             ("MDD (일별)", "mdd", "{:.2%}"),
+            ("변동성 (위험)", "volatility", "{:.2%}"),
             ("Sharpe", "sharpe", "{:.2f}"),
             ("Sortino", "sortino", "{:.2f}"),
             ("CAGR / MDD", "cagr_mdd", "{:.2f}"),
@@ -3549,10 +3902,199 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     else:
         st.warning("⚠️ 전략 정량 비교를 위한 공통 기간 데이터가 부족합니다.")
 
+    haenam_downside = calculate_strategy_downside_comparison(
+        quant_aligned.get(quant_labels[0]),
+        quant_aligned.get(FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL),
+    )
+    if haenam_downside is not None:
+        st.markdown("#### 🔎 해남 A 초과수익 vs 하락 민감도")
+        st.caption(
+            "Faber A가 오른 달과 빠진 달을 나눠서 해남 A가 추가 수익을 냈는지, "
+            "아니면 하락월 손실만 더 키웠는지 보는 표입니다."
+        )
+        stress_note = (
+            f"{haenam_downside['stress_months']}개월"
+            if haenam_downside["stress_months"] > 0 else "해당 없음"
+        )
+        downside_rows = [
+            {
+                "구분": "전체 월",
+                "월수": f"{haenam_downside['months']}개월",
+                "Faber A 평균": "-",
+                "해남 A 평균": "-",
+                "해남 A 초과": _fmt(haenam_downside["avg_excess"], "{:+.2%}"),
+                "해석": "월평균 초과수익이 양수면 장기 알파 후보",
+            },
+            {
+                "구분": "Faber A 상승월",
+                "월수": f"{haenam_downside['up_months']}개월",
+                "Faber A 평균": _fmt(haenam_downside["up_base_avg"], "{:.2%}"),
+                "해남 A 평균": _fmt(haenam_downside["up_target_avg"], "{:.2%}"),
+                "해남 A 초과": _fmt(haenam_downside["up_excess_avg"], "{:+.2%}"),
+                "해석": "상승장에서 집행 알파가 붙는지 확인",
+            },
+            {
+                "구분": "Faber A 하락월",
+                "월수": f"{haenam_downside['down_months']}개월",
+                "Faber A 평균": _fmt(haenam_downside["down_base_avg"], "{:.2%}"),
+                "해남 A 평균": _fmt(haenam_downside["down_target_avg"], "{:.2%}"),
+                "해남 A 초과": _fmt(haenam_downside["down_excess_avg"], "{:+.2%}"),
+                "해석": "음수가 클수록 방어 비용이 큼",
+            },
+            {
+                "구분": "Faber A -5% 이하 월",
+                "월수": stress_note,
+                "Faber A 평균": _fmt(haenam_downside["stress_base_avg"], "{:.2%}"),
+                "해남 A 평균": _fmt(haenam_downside["stress_target_avg"], "{:.2%}"),
+                "해남 A 초과": _fmt(haenam_downside["stress_excess_avg"], "{:+.2%}"),
+                "해석": "큰 하락장에서 더 깨지는지 확인",
+            },
+            {
+                "구분": "하락월 베타",
+                "월수": f"{haenam_downside['down_months']}개월 기준",
+                "Faber A 평균": "1.00",
+                "해남 A 평균": _fmt(haenam_downside["down_beta"], "{:.2f}"),
+                "해남 A 초과": "-",
+                "해석": "1보다 크면 Faber A 하락에 더 민감",
+            },
+            {
+                "구분": "하락월 더 손실 빈도",
+                "월수": f"{haenam_downside['down_months']}개월 기준",
+                "Faber A 평균": "-",
+                "해남 A 평균": _fmt(haenam_downside["down_worse_rate"], "{:.1%}"),
+                "해남 A 초과": "-",
+                "해석": "하락월에 해남 A가 더 나빴던 비율",
+            },
+            {
+                "구분": "상승월 캡처",
+                "월수": f"{haenam_downside['up_months']}개월 기준",
+                "Faber A 평균": "1.00",
+                "해남 A 평균": _fmt(haenam_downside["up_capture"], "{:.2f}"),
+                "해남 A 초과": "-",
+                "해석": "1보다 크면 상승장에서 더 강하게 따라감",
+            },
+        ]
+        st.dataframe(pd.DataFrame(downside_rows), use_container_width=True, hide_index=True)
+
     quant_warn_df = quant_status_df[quant_status_df["상태"] != "비교 가능"]
     if not quant_warn_df.empty:
         st.caption("⚠️ 공정 비교 주의/제외 전략")
         st.dataframe(quant_warn_df, use_container_width=True, hide_index=True)
+
+    if faber_nasdaq_active_nav is not None and not faber_nasdaq_active_nav.empty:
+        period_rows = []
+        for label, period_start in [
+            ("TIME 상장 이후", TIME_NASDAQ_ACTIVE_LISTING_DATE),
+            ("KoAct 상장 이후", KOACT_NASDAQ_GROWTH_ACTIVE_LISTING_DATE),
+        ]:
+            base_m = calculate_period_nav_metrics(nav_df, period_start, current_date)
+            active_m = calculate_period_nav_metrics(faber_nasdaq_active_nav, period_start, current_date)
+            if base_m is None or active_m is None:
+                continue
+            period_rows.append({
+                "구간": label,
+                "기간": f"{active_m['start'].strftime('%Y-%m-%d')} ~ {active_m['end'].strftime('%Y-%m-%d')}",
+                "Faber A CAGR": _fmt(base_m["cagr"], "{:.2%}"),
+                "액티브 집행 CAGR": _fmt(active_m["cagr"], "{:.2%}"),
+                "CAGR 차이": _fmt(active_m["cagr"] - base_m["cagr"], "{:+.2%}"),
+                "Faber A MDD": _fmt(base_m["mdd"], "{:.2%}"),
+                "액티브 집행 MDD": _fmt(active_m["mdd"], "{:.2%}"),
+                "누적수익률 차이": _fmt(active_m["total_return"] - base_m["total_return"], "{:+.2%}"),
+            })
+        if period_rows:
+            st.markdown("#### 🧪 나스닥 액티브 집행형 상장 이후 비교")
+            st.caption(
+                "Faber A의 나스닥 ON/OFF 신호는 기존 나스닥100 기준 그대로 두고, "
+                "상장 이후 나스닥 20% 슬롯 집행만 바꿨을 때의 차이입니다."
+            )
+            st.dataframe(pd.DataFrame(period_rows), use_container_width=True, hide_index=True)
+
+        nasdaq_name = NASDAQ100_ASSET_NAME
+        base_nasdaq_df = all_data.get(nasdaq_name) if nasdaq_name else None
+        active_exec_df = faber_nasdaq_active_data.get(nasdaq_name) if faber_nasdaq_active_data is not None and nasdaq_name else None
+        time_df = fetch_etf_data(TIME_NASDAQ_ACTIVE_TICKER, data_start, current_date, is_momentum=False)
+        koact_df = fetch_etf_data(KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, data_start, current_date, is_momentum=False)
+        downside_rows = []
+        downside_periods = [
+            ("TIME 상장 이후", TIME_NASDAQ_ACTIVE_LISTING_DATE, {
+                "나스닥100": base_nasdaq_df,
+                "TIME": time_df,
+                "액티브 집행 혼합": active_exec_df,
+            }),
+            ("KoAct 상장 이후", KOACT_NASDAQ_GROWTH_ACTIVE_LISTING_DATE, {
+                "나스닥100": base_nasdaq_df,
+                "TIME": time_df,
+                "KoAct": koact_df,
+                "TIME/KoAct 50:50": active_exec_df,
+            }),
+        ]
+        for period_label, period_start, targets in downside_periods:
+            for target_label, target_df in targets.items():
+                metrics = calculate_downside_sensitivity_metrics(
+                    base_nasdaq_df, target_df, period_start, current_date, price_col=price_col
+                )
+                if metrics is None:
+                    continue
+                downside_rows.append({
+                    "구간": period_label,
+                    "대상": target_label,
+                    "월수": metrics["months"],
+                    "하락월": metrics["down_months"],
+                    "CAGR": _fmt(metrics["cagr"], "{:.2%}"),
+                    "MDD": _fmt(metrics["mdd"], "{:.2%}"),
+                    "변동성": _fmt(metrics["volatility"], "{:.2%}"),
+                    "나스닥 하락월 평균": _fmt(metrics["down_avg"], "{:.2%}"),
+                    "나스닥 -5%월 평균": _fmt(metrics["stress_avg"], "{:.2%}") if metrics["stress_months"] > 0 else "-",
+                    "하락월 베타": _fmt(metrics["down_beta"], "{:.2f}"),
+                })
+        if downside_rows:
+            st.markdown("#### 📉 나스닥 액티브 ETF 하락 민감도")
+            st.caption(
+                "나스닥100 월수익률이 음수인 달만 따로 보며, 하락월 베타는 나스닥 하락월 기준 민감도입니다. "
+                "표본이 짧은 KoAct 구간은 참고용으로 보세요."
+            )
+            st.dataframe(pd.DataFrame(downside_rows), use_container_width=True, hide_index=True)
+
+    kr_compare_strategies = {"Faber A 기본": nav_df}
+    kr_compare_strategies.update(kr_semiconductor_nav_map)
+    kr_aligned, kr_meta, kr_status = align_strategies_to_common_dates(kr_compare_strategies, min_obs_days=252)
+    kr_rows = []
+    kr_display = {
+        "Faber A 기본": "코스피200 20%",
+        FABER_KR_SAMSUNG_EXEC_LABEL: "삼성전자 20%",
+        FABER_KR_HYNIX_EXEC_LABEL: "SK하이닉스 20%",
+        FABER_KR_SEMI_MIX_EXEC_LABEL: "삼성전자 10% + SK하이닉스 10%",
+    }
+    for label, nav in kr_aligned.items():
+        metrics = _strategy_metrics(nav, IC)
+        if metrics is None:
+            continue
+        kr_rows.append({
+            "전략": label,
+            "한국주식 집행": kr_display.get(label, label),
+            "CAGR": _fmt(metrics["cagr"], "{:.2%}"),
+            "MDD": _fmt(metrics["mdd"], "{:.2%}"),
+            "변동성": _fmt(metrics["volatility"], "{:.2%}"),
+            "Sharpe": _fmt(metrics["sharpe"], "{:.2f}"),
+            "Sortino": _fmt(metrics["sortino"], "{:.2f}"),
+            "Martin": _fmt(metrics["martin"], "{:.2f}"),
+            "CVaR 5% (월)": _fmt(metrics["cvar_5"], "{:.2%}"),
+        })
+    if kr_rows:
+        st.markdown("#### 🇰🇷 코스피200 신호 기반 한국주식 집행 실험")
+        st.caption(
+            "코스피200 -5% 룰 신호는 그대로 두고, 기존 코스피200 20% 슬롯의 실제 매수 대상만 바꾼 실험입니다."
+        )
+        if kr_meta["common_obs"] > 0:
+            st.caption(
+                f"📅 공통 비교 기간: {kr_meta['common_start'].strftime('%Y-%m-%d')} ~ "
+                f"{kr_meta['common_end'].strftime('%Y-%m-%d')} ({kr_meta['common_obs']}거래일)"
+            )
+        st.dataframe(pd.DataFrame(kr_rows), use_container_width=True, hide_index=True)
+        kr_warn = kr_status[kr_status["상태"] != "비교 가능"]
+        if not kr_warn.empty:
+            st.caption("⚠️ 한국주식 집행 실험 주의/제외 전략")
+            st.dataframe(kr_warn, use_container_width=True, hide_index=True)
 
     def _render_overlay_section():
         st.markdown("---")
