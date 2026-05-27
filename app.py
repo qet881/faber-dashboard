@@ -536,6 +536,10 @@ FABER_KR_SAMSUNG_EXEC_LABEL = 'Faber A (코스피 신호·삼성전자 집행)'
 FABER_KR_HYNIX_EXEC_LABEL = 'Faber A (코스피 신호·하이닉스 집행)'
 FABER_KR_SEMI_MIX_EXEC_LABEL = 'Faber A (코스피 신호·삼전/하닉 50:50)'
 FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL = '해남 A'
+HAENAM_SAMSUNG_NAME = '삼성전자'
+HAENAM_HYNIX_NAME = 'SK하이닉스'
+HAENAM_TIME_NAME = 'TIME 나스닥100액티브'
+HAENAM_KOACT_NAME = 'KoAct 나스닥100액티브'
 SAMSUNG_ELECTRONICS_TICKER = '005930'
 SK_HYNIX_TICKER = '000660'
 CHINA_CSI300_CNY_ASSET = '중국CSI300(위안화 노출)'
@@ -652,10 +656,13 @@ SLOT_STRATEGIES = [
 
 PREFERRED_ACCOUNT = {
     '코스피200': '일반', '미국나스닥100': 'ISA',
+    HAENAM_SAMSUNG_NAME: '일반', HAENAM_HYNIX_NAME: '일반',
+    HAENAM_TIME_NAME: 'ISA', HAENAM_KOACT_NAME: 'ISA',
     '한국채30년': 'ISA', '미국채30년': 'ISA', '금현물': '일반'
 }
-GENERAL_PRIORITY = ['금현물', '코스피200']
-ISA_PRIORITY = ['미국채30년', '한국채30년', '미국나스닥100']
+GENERAL_PRIORITY = ['금현물', HAENAM_SAMSUNG_NAME, HAENAM_HYNIX_NAME, '코스피200']
+ISA_PRIORITY = ['미국채30년', '한국채30년', HAENAM_TIME_NAME, HAENAM_KOACT_NAME, '미국나스닥100']
+ACCOUNT_COLUMNS = ["금계좌", "일반계좌", "ISA_A", "ISA_B"]
 MIN_VALID_MONTHS = 12
 
 
@@ -1915,6 +1922,74 @@ def build_faber_active_nasdaq_kr_semi_data(base_all_data, start_date, end_date, 
     return build_faber_kr_semiconductor_overlay_data(
         nasdaq_active_data, start_date, end_date, price_col=price_col
     )
+
+def get_haenam_live_price_data(base_all_data, start_date, end_date):
+    """실전 화면에서 해남 A 집행 자산의 현재가/월간 성과 계산에 쓸 데이터."""
+    data = {k: v for k, v in (base_all_data or {}).items()}
+    data[HAENAM_SAMSUNG_NAME] = fetch_etf_data(SAMSUNG_ELECTRONICS_TICKER, start_date, end_date, is_momentum=False)
+    data[HAENAM_HYNIX_NAME] = fetch_etf_data(SK_HYNIX_TICKER, start_date, end_date, is_momentum=False)
+    data[HAENAM_TIME_NAME] = fetch_etf_data(TIME_NASDAQ_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    data[HAENAM_KOACT_NAME] = fetch_etf_data(KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    return data
+
+def expand_haenam_execution_weights(base_weights, as_of_date):
+    """Faber A 신호 비중을 해남 A 실제 집행 비중으로 변환한다."""
+    out = {}
+    for asset, weight in (base_weights or {}).items():
+        w = float(weight or 0.0)
+        if w <= 0:
+            continue
+        if asset == KR_STOCK_MIX_ASSET:
+            out[HAENAM_SAMSUNG_NAME] = out.get(HAENAM_SAMSUNG_NAME, 0.0) + w * 0.5
+            out[HAENAM_HYNIX_NAME] = out.get(HAENAM_HYNIX_NAME, 0.0) + w * 0.5
+        elif asset == NASDAQ100_ASSET_NAME:
+            targets = _nasdaq_active_execution_targets(as_of_date)
+            out[NASDAQ100_ASSET_NAME] = out.get(NASDAQ100_ASSET_NAME, 0.0) + w * targets.get("base", 0.0)
+            out[HAENAM_TIME_NAME] = out.get(HAENAM_TIME_NAME, 0.0) + w * targets.get("time", 0.0)
+            out[HAENAM_KOACT_NAME] = out.get(HAENAM_KOACT_NAME, 0.0) + w * targets.get("koact", 0.0)
+        else:
+            out[asset] = out.get(asset, 0.0) + w
+    invested = sum(v for k, v in out.items() if k != CASH_NAME)
+    out[CASH_NAME] = max(0.0, 1.0 - invested)
+    return {k: v for k, v in out.items() if v > 0.000001}
+
+def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col="Adj Close"):
+    """신호표의 Faber A 신호 행을 해남 A 실제 매수 대상 행으로 확장한다."""
+    rows = []
+    for row in signal_rows:
+        asset = row.get("자산명")
+        weight = float(row.get("추천비중", 0.0) or 0.0)
+        if asset == KR_STOCK_MIX_ASSET and weight > 0:
+            components = [
+                (HAENAM_SAMSUNG_NAME, SAMSUNG_ELECTRONICS_TICKER, weight * 0.5),
+                (HAENAM_HYNIX_NAME, SK_HYNIX_TICKER, weight * 0.5),
+            ]
+        elif asset == NASDAQ100_ASSET_NAME and weight > 0:
+            targets = _nasdaq_active_execution_targets(as_of_date)
+            components = []
+            if targets.get("base", 0.0) > 0:
+                components.append((NASDAQ100_ASSET_NAME, ASSETS.get(NASDAQ100_ASSET_NAME), weight * targets["base"]))
+            if targets.get("time", 0.0) > 0:
+                components.append((HAENAM_TIME_NAME, TIME_NASDAQ_ACTIVE_TICKER, weight * targets["time"]))
+            if targets.get("koact", 0.0) > 0:
+                components.append((HAENAM_KOACT_NAME, KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, weight * targets["koact"]))
+        else:
+            components = [(asset, row.get("티커"), weight)]
+
+        for exec_name, ticker, exec_weight in components:
+            exec_row = dict(row)
+            exec_row["신호자산"] = asset
+            exec_row["자산명"] = exec_name
+            exec_row["티커"] = ticker
+            exec_row["추천비중"] = exec_weight
+            exec_df = price_data_map.get(exec_name)
+            exec_price = get_price_at_date(exec_df, as_of_date, price_col=price_col)
+            if exec_price is not None:
+                exec_row["현재가"] = exec_price
+            if exec_name != asset:
+                exec_row["Faber신호"] = f"{row.get('Faber신호', '-')} / {asset} 기준"
+            rows.append(exec_row)
+    return rows
 
 
 def build_faber_ex_bonds_strategy_data(base_all_data, start_date, end_date, include_china=False, include_india=False):
@@ -3437,49 +3512,92 @@ def create_weights_chart(monthly_weights_history):
 # ==============================
 # 9. 3계좌 최적화
 # ==============================
-def optimize_allocation(df_res, b_gen, b_isa_a, b_isa_b):
-    total = float(b_gen + b_isa_a + b_isa_b)
-    rem_gen, rem_isa_a, rem_isa_b = float(b_gen), float(b_isa_a), float(b_isa_b)
+def optimize_allocation(df_res, b_gen_kospi, b_gen_gold, b_isa_a, b_isa_b):
+    taxable_total = float(b_gen_kospi + b_gen_gold)
+    total = float(taxable_total + b_isa_a + b_isa_b)
+    rem = {
+        "일반계좌": taxable_total,
+        "금계좌": 0.0,
+        "ISA_A": float(b_isa_a),
+        "ISA_B": float(b_isa_b),
+    }
     weight_map = {}
     if df_res is not None and len(df_res) > 0 and "자산명" in df_res.columns and "추천비중" in df_res.columns:
         weight_map = df_res.set_index("자산명")["추천비중"].to_dict()
     final = {}
+
+    def _asset_bucket(asset):
+        if asset not in final:
+            final[asset] = {col: 0.0 for col in ACCOUNT_COLUMNS}
+        return final[asset]
+
+    def _account_priority(asset):
+        if asset == '금현물':
+            return ["금계좌"]
+        if asset in (HAENAM_TIME_NAME, HAENAM_KOACT_NAME, NASDAQ100_ASSET_NAME, '미국나스닥100'):
+            return ["ISA_A", "ISA_B", "일반계좌"]
+        if asset in ('미국채30년', '한국채30년'):
+            return ["ISA_B", "ISA_A", "일반계좌"]
+        return ["일반계좌", "ISA_A", "ISA_B"]
+
+    def _allocate(asset, target):
+        left = float(target)
+        bucket = _asset_bucket(asset)
+        for account in _account_priority(asset):
+            if left <= 0:
+                break
+            if account == "금계좌":
+                fill = min(left, rem["일반계좌"])
+                rem["일반계좌"] -= fill
+            else:
+                fill = min(left, rem[account])
+                rem[account] -= fill
+            bucket[account] += fill
+            left -= fill
+        if left > 0.5:
+            # 계좌 제약을 넘는 극단 상황에서는 일반계좌에 표시해 총 목표 금액이 사라지지 않게 한다.
+            bucket["일반계좌"] += left
+            rem["일반계좌"] -= left
+
     ordered_assets = []
     for a in (GENERAL_PRIORITY + ISA_PRIORITY):
-        if a in ASSETS and a not in ordered_assets: ordered_assets.append(a)
+        if a not in ordered_assets: ordered_assets.append(a)
+    for a in weight_map.keys():
+        if a != CASH_NAME and a not in ordered_assets: ordered_assets.append(a)
     for a in ASSETS.keys():
         if a not in ordered_assets: ordered_assets.append(a)
     targets = []
     for asset in ordered_assets:
         w = float(weight_map.get(asset, 0.0))
         if w <= 0: continue
-        targets.append({"asset": asset, "target": float(total * w), "pref": PREFERRED_ACCOUNT.get(asset, "일반")})
+        if asset == CASH_NAME:
+            continue
+        targets.append({"asset": asset, "target": float(total * w)})
     for t in targets:
-        if t["pref"] != "일반": continue
-        tgt = t["target"]
-        f_gen = min(tgt, rem_gen); rem_gen -= f_gen; tgt -= f_gen
-        f_isa_a = min(tgt, rem_isa_a); rem_isa_a -= f_isa_a; tgt -= f_isa_a
-        f_isa_b = min(tgt, rem_isa_b); rem_isa_b -= f_isa_b
-        final[t["asset"]] = {"일반": f_gen, "ISA_A": f_isa_a, "ISA_B": f_isa_b}
-    for t in targets:
-        if t["pref"] != "ISA": continue
-        tgt = t["target"]
-        f_isa_a = min(tgt, rem_isa_a); rem_isa_a -= f_isa_a; tgt -= f_isa_a
-        f_isa_b = min(tgt, rem_isa_b); rem_isa_b -= f_isa_b; tgt -= f_isa_b
-        f_gen = min(tgt, rem_gen); rem_gen -= f_gen
-        final[t["asset"]] = {"일반": f_gen, "ISA_A": f_isa_a, "ISA_B": f_isa_b}
-    final[CASH_NAME] = {"일반": max(0, rem_gen), "ISA_A": max(0, rem_isa_a), "ISA_B": max(0, rem_isa_b)}
+        _allocate(t["asset"], t["target"])
+    final[CASH_NAME] = {
+        "금계좌": 0.0,
+        "일반계좌": max(0, rem["일반계좌"]),
+        "ISA_A": max(0, rem["ISA_A"]),
+        "ISA_B": max(0, rem["ISA_B"]),
+    }
     res_list = []
-    for k in list(ASSETS.keys()) + [CASH_NAME]:
+    output_assets = []
+    for k in ordered_assets + [CASH_NAME]:
+        if k not in output_assets:
+            output_assets.append(k)
+    for k in output_assets:
         if k in final:
             v = final[k]
             res_list.append({"자산명": k, "추천비중": float(weight_map.get(k, 0.0)),
-                "총목표금액": float(v["일반"]+v["ISA_A"]+v["ISA_B"]),
-                "일반계좌": float(v["일반"]), "ISA_A": float(v["ISA_A"]), "ISA_B": float(v["ISA_B"])})
+                "총목표금액": float(sum(v[col] for col in ACCOUNT_COLUMNS)),
+                "금계좌": float(v["금계좌"]), "일반계좌": float(v["일반계좌"]),
+                "ISA_A": float(v["ISA_A"]), "ISA_B": float(v["ISA_B"])})
     df_out = pd.DataFrame(res_list)
-    for c in ["총목표금액","일반계좌","ISA_A","ISA_B"]: df_out[c] = df_out[c].round(0)
+    for c in ["총목표금액"] + ACCOUNT_COLUMNS: df_out[c] = df_out[c].round(0)
     sum_row = {"자산명": "합계", "추천비중": 1.0, "총목표금액": float(df_out["총목표금액"].sum()),
-        "일반계좌": float(df_out["일반계좌"].sum()), "ISA_A": float(df_out["ISA_A"].sum()), "ISA_B": float(df_out["ISA_B"].sum())}
+        "금계좌": float(df_out["금계좌"].sum()), "일반계좌": float(df_out["일반계좌"].sum()),
+        "ISA_A": float(df_out["ISA_A"].sum()), "ISA_B": float(df_out["ISA_B"].sum())}
     return pd.concat([df_out, pd.DataFrame([sum_row])], ignore_index=True)
 
 
@@ -5761,16 +5879,23 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     data_start = min(bt_start_date, inv_start_date) - relativedelta(months=18)
     with st.spinner("📊 데이터를 불러오는 중..."):
         all_data = load_market_data(data_start, current_date, hybrid=True)
+        haenam_strategy_data = build_faber_active_nasdaq_kr_semi_data(
+            all_data, data_start, current_date, price_col=price_col
+        )
+        haenam_price_data = get_haenam_live_price_data(all_data, data_start, current_date)
+    if haenam_strategy_data is None:
+        st.warning("해남 A 집행 데이터가 부족해 실전 성과 NAV는 Faber A 기준으로 임시 계산합니다.")
+        haenam_strategy_data = all_data
 
-    # 역대 백테스트 MDD 계산 (Faber A 기준, 위에서 로딩한 all_data 재사용)
-    with st.spinner("📊 역대 MDD 계산 중 (Faber A)..."):
-        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, 10_000_000, all_data,
+    # 역대 백테스트 MDD 계산 (해남 A 기준, 위에서 로딩한 데이터 재사용)
+    with st.spinner("📊 역대 MDD 계산 중 (해남 A)..."):
+        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, 10_000_000, haenam_strategy_data,
             mode='A', buffer_df=None, price_col=price_col)
         bt_mdd_historical = calculate_performance_metrics(bt_nav_full, 10_000_000)[2] if bt_nav_full is not None else None
 
     st.subheader("📊 성과 분석")
     st.markdown("#### 💼 나의 투자 성과")
-    personal_nav_df = simulate_faber_strategy(inv_start_date, current_date, init_capital, all_data,
+    personal_nav_df = simulate_faber_strategy(inv_start_date, current_date, init_capital, haenam_strategy_data,
         mode='A', buffer_df=None, price_col=price_col)
     performance_base_date = personal_nav_df.index[-1] if personal_nav_df is not None and len(personal_nav_df) > 0 else current_date
     cumulative_principal = calculate_cumulative_principal(
@@ -5878,12 +6003,13 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 f"기준금액 출처: {nav_source}."
             )
 
-            # 리밸런싱 당시 Faber A 비중
-            rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
+            # 리밸런싱 당시 해남 A 실제 집행 비중
+            base_rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
+            rebal_weights = expand_haenam_execution_weights(base_rebal_weights, rebal_date)
 
             monthly_rows = []
             total_pnl = 0.0
-            asset_labels = list(ASSETS.keys()) + [CASH_NAME]
+            asset_labels = [k for k, v in rebal_weights.items() if v >= 0.001]
             for an in asset_labels:
                 w = rebal_weights.get(an, 0.0)
                 if w < 0.001:
@@ -5893,8 +6019,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                     px_s = get_price_at_date(all_data.get(CASH_NAME), rebal_date, price_col=price_col) or 10000.0
                     px_e = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or px_s
                 else:
-                    px_s = get_price_at_date(all_data.get(an), rebal_date, price_col=price_col)
-                    px_e = get_price_at_date(all_data.get(an), current_date, price_col=price_col)
+                    px_s = get_price_at_date(haenam_price_data.get(an), rebal_date, price_col=price_col)
+                    px_e = get_price_at_date(haenam_price_data.get(an), current_date, price_col=price_col)
                 if not px_s or px_s <= 0 or not px_e or px_e <= 0:
                     continue
                 ret = (px_e / px_s) - 1.0
@@ -5955,7 +6081,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         traded_at = ((rt_kodex or {}).get("traded_at") or "").replace("T", " ")[:16]
         traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
         st.caption(
-            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
+            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f}{traded_txt})"
         )
@@ -5963,28 +6090,30 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         age_min = gold_rt.get("sticky_age_min")
         age_txt = f"{int(age_min):d}분 전 값" if age_min is not None else "최근 성공값"
         st.caption(
-            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
+            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 0064K0 최근 성공값({age_txt}) 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f})"
         )
     elif gold_source == "GC_FX_REALTIME":
         st.caption(
-            f"**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). "
+            f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
+            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
             f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})"
         )
     elif gold_stable_mode:
-        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
+        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
     else:
-        st.caption("**Faber A 룰**: 12개월 고점(수정주가 월말 기준) 대비 -5% 이내 → 20%, 그 외 → 0%. 나머지 현금(MMF). 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
+        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
     col_rt1, col_rt2 = st.columns([1, 4])
     with col_rt1:
-        if st.button("🔄 신호표 새로고침", help="Faber A 신호 및 추천 비중 섹션만 새로 계산"):
+        if st.button("🔄 신호표 새로고침", help="해남 A 신호 및 추천 비중 섹션만 새로 계산"):
             # 전체 데이터 캐시는 유지하고, 신호표 계산에 필요한 실시간 소스만 갱신
             get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
             st.rerun()
-    st.subheader("📋 Faber A 신호 및 추천 비중")
+    st.subheader("📋 해남 A 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
@@ -6045,16 +6174,17 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             "추천비중": faber_w,
             "_is_gold": ticker == '411060'
         })
-    df_results = pd.DataFrame(results)
-    # 금현물 표시명은 실시간 소스에 맞게 변경 (리밸런싱용 원본은 보존)
-    df_results_orig = df_results.copy()  # 리밸런싱용
+    df_results = pd.DataFrame(
+        expand_haenam_signal_rows(results, current_date, haenam_price_data, price_col=price_col)
+    )
     cash_weight = max(0.0, 1.0 - float(df_results["추천비중"].sum()))
     cash_price = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or 10000.0
     df_results = pd.concat([df_results, pd.DataFrame([{
-        "자산명": CASH_NAME, "티커": CASH_TICKER, "현재가": cash_price,
+        "신호자산": CASH_NAME, "자산명": CASH_NAME, "티커": CASH_TICKER, "현재가": cash_price,
         "12M고점": None, "고점대비": None, "모멘텀": None,
         "Faber신호": "-", "추천비중": cash_weight, "_is_gold": False
     }])], ignore_index=True)
+    df_results_orig = df_results.copy()  # 리밸런싱용
     df_display = df_results.copy()
     # 금현물 표시명 변경
     if gold_source == "KODEX_REALTIME":
@@ -6072,7 +6202,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     df_display["고점대비"] = df_display["고점대비"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
     df_display["모멘텀"] = df_display["모멘텀"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
     df_display["추천비중"] = df_display["추천비중"].apply(lambda x: f"{x*100:.0f}%")
-    df_display.columns = ["자산명", "티커", "현재가", "12M고점", "고점대비", "모멘텀(참고)", "Faber신호", "추천비중"]
+    df_display = df_display[["신호자산", "자산명", "티커", "현재가", "12M고점", "고점대비", "모멘텀", "Faber신호", "추천비중"]]
+    df_display.columns = ["신호자산", "집행자산", "티커", "현재가", "12M고점", "고점대비", "모멘텀(참고)", "신호", "추천비중"]
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
     # 금현물 참고: GLD * USD/KRW
@@ -6118,17 +6249,24 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.subheader("🏦 3계좌 절세 최적화 리밸런싱")
-    st.info("👇 우선순위 배치: 일반=금→코스피 / ISA=미국채→한국채→나스닥100")
+    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=삼성전자→SK하이닉스 / ISA_A=나스닥 액티브 우선 / ISA_B=채권 우선")
     if st.button("🚀 리밸런싱 목표 계산하기", type="primary"):
         with st.spinner("계산 중..."):
-            final_df = optimize_allocation(df_results_orig[["자산명","추천비중"]].copy(), bal_gen, bal_isa_a, bal_isa_b)
+            final_df = optimize_allocation(
+                df_results_orig[["자산명","추천비중"]].copy(),
+                bal_gen_kospi,
+                bal_gen_gold,
+                bal_isa_a,
+                bal_isa_b,
+            )
             st.success("✅ 계산 완료!")
             disp = final_df.copy()
             disp["추천비중"] = disp["추천비중"].apply(lambda x: f"{x*100:.2f}%" if pd.notna(x) else "")
-            for c in ["총목표금액","일반계좌","ISA_A","ISA_B"]: disp[c] = disp[c].apply(lambda x: f"{x:,.0f}")
+            for c in ["총목표금액"] + ACCOUNT_COLUMNS: disp[c] = disp[c].apply(lambda x: f"{x:,.0f}")
             st.dataframe(disp.style
                 .map(lambda x: "background-color: #e6f3ff" if x != "0" else "", subset=["ISA_A","ISA_B"])
-                .map(lambda x: "background-color: #fff5e6" if x != "0" else "", subset=["일반계좌"]),
+                .map(lambda x: "background-color: #fff5e6" if x != "0" else "", subset=["일반계좌"])
+                .map(lambda x: "background-color: #fff8d6" if x != "0" else "", subset=["금계좌"]),
                 use_container_width=True, height=400)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -6147,9 +6285,10 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         ex["모멘텀"] = ex["모멘텀"].apply(lambda x: x if pd.notna(x) else "-")
         ex["고점대비"] = ex["고점대비"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
         ex["추천비중"] = ex["추천비중"]*100
-        ex.columns = ["자산명","티커","현재가","12M고점","고점대비","모멘텀(참고)","Faber신호","추천비중(%)"]
-        ex.to_excel(writer, sheet_name="Faber_A_리밸런싱", index=False)
-    st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"FaberA_나스닥100_{current_dt.strftime('%Y%m%d')}.xlsx",
+        ex = ex[["신호자산", "자산명", "티커", "현재가", "12M고점", "고점대비", "모멘텀", "Faber신호", "추천비중"]]
+        ex.columns = ["신호자산","집행자산","티커","현재가","12M고점","고점대비","모멘텀(참고)","신호","추천비중(%)"]
+        ex.to_excel(writer, sheet_name="Haenam_A_리밸런싱", index=False)
+    st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"HaenamA_리밸런싱_{current_dt.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 
