@@ -717,6 +717,8 @@ KOACT_NASDAQ_GROWTH_ACTIVE_TICKER = '0015B0'
 TIME_NASDAQ_ACTIVE_LISTING_DATE = pd.Timestamp('2022-05-11')
 KOACT_NASDAQ_GROWTH_ACTIVE_LISTING_DATE = pd.Timestamp('2025-02-25')
 FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL = '해남 A'
+FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL = '해남 A (한국=삼성전자)'
+FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL = '해남 A (한국=SK하이닉스)'
 HAENAM_SAMSUNG_NAME = '삼성전자'
 HAENAM_HYNIX_NAME = 'SK하이닉스'
 HAENAM_TIME_NAME = 'TIME 나스닥100액티브'
@@ -1921,32 +1923,45 @@ def build_faber_nasdaq_active_execution_data(base_all_data, start_date, end_date
     return data
 
 
-def build_faber_kr_semiconductor_overlay_data(base_all_data, start_date, end_date, price_col="Adj Close"):
-    """코스피200 신호를 유지하고, 삼성전자/SK하이닉스 데이터가 있는 구간부터 50:50 집행으로 덮어쓴다."""
+def build_faber_kr_stock_overlay_data(base_all_data, start_date, end_date, kr_weights, price_col="Adj Close"):
+    """코스피200 신호(_모멘텀 시리즈)는 그대로 유지하고, 한국주식 20% 슬롯의 실제 집행만
+    지정한 비중으로 데이터가 있는 구간부터 덮어쓴다.
+    kr_weights 예: {"samsung": 0.5, "hynix": 0.5}(해남 A) / {"samsung": 1.0} / {"hynix": 1.0}
+    """
     if base_all_data is None:
         return None
     base_slot_df = base_all_data.get(KR_STOCK_MIX_ASSET)
     if base_slot_df is None or base_slot_df.empty:
         return None
 
-    samsung_df = fetch_etf_data(SAMSUNG_ELECTRONICS_TICKER, start_date, end_date, is_momentum=False)
-    hynix_df = fetch_etf_data(SK_HYNIX_TICKER, start_date, end_date, is_momentum=False)
+    components = {}
+    if float(kr_weights.get("samsung", 0.0)) > 0:
+        components["samsung"] = fetch_etf_data(SAMSUNG_ELECTRONICS_TICKER, start_date, end_date, is_momentum=False)
+    if float(kr_weights.get("hynix", 0.0)) > 0:
+        components["hynix"] = fetch_etf_data(SK_HYNIX_TICKER, start_date, end_date, is_momentum=False)
     trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
-    semi_exec_df = build_weighted_execution_series(
-        {"samsung": samsung_df, "hynix": hynix_df},
-        lambda _date: {"samsung": 0.5, "hynix": 0.5},
+    exec_df = build_weighted_execution_series(
+        components,
+        lambda _date: kr_weights,
         trading_dates,
         price_col=price_col,
     )
-    if semi_exec_df is None or semi_exec_df.empty:
+    if exec_df is None or exec_df.empty:
         return None
 
     data = {k: v for k, v in base_all_data.items()}
-    data[KR_STOCK_MIX_ASSET] = _chain_link_series(base_slot_df, semi_exec_df)
+    data[KR_STOCK_MIX_ASSET] = _chain_link_series(base_slot_df, exec_df)
     momentum_key = next((k for k in base_all_data.keys() if k.startswith(f"{KR_STOCK_MIX_ASSET}_")), None)
     if momentum_key:
         data[momentum_key] = base_all_data.get(momentum_key, base_slot_df)
     return data
+
+
+def build_faber_kr_semiconductor_overlay_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """코스피200 신호를 유지하고, 삼성전자/SK하이닉스 데이터가 있는 구간부터 50:50 집행으로 덮어쓴다."""
+    return build_faber_kr_stock_overlay_data(
+        base_all_data, start_date, end_date, {"samsung": 0.5, "hynix": 0.5}, price_col=price_col
+    )
 
 
 def build_faber_active_nasdaq_kr_semi_data(base_all_data, start_date, end_date, price_col="Adj Close"):
@@ -1960,6 +1975,18 @@ def build_faber_active_nasdaq_kr_semi_data(base_all_data, start_date, end_date, 
         nasdaq_active_data, start_date, end_date, price_col=price_col
     )
 
+def build_faber_active_nasdaq_kr_single_data(base_all_data, start_date, end_date, kr_weights, price_col="Adj Close"):
+    """나스닥은 액티브 ETF 집행, 한국주식 20% 슬롯은 단일 종목(삼전 또는 하닉) 100% 집행.
+    신호는 해남 A와 동일하게 코스피200/나스닥100 12개월 고점 -5% 룰을 유지한다."""
+    nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+        base_all_data, start_date, end_date, price_col=price_col
+    )
+    if nasdaq_active_data is None:
+        return None
+    return build_faber_kr_stock_overlay_data(
+        nasdaq_active_data, start_date, end_date, kr_weights, price_col=price_col
+    )
+
 def get_haenam_live_price_data(base_all_data, start_date, end_date):
     """실전 화면에서 해남 A 집행 자산의 현재가/월간 성과 계산에 쓸 데이터."""
     data = {k: v for k, v in (base_all_data or {}).items()}
@@ -1969,16 +1996,27 @@ def get_haenam_live_price_data(base_all_data, start_date, end_date):
     data[HAENAM_KOACT_NAME] = fetch_etf_data(KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
     return data
 
-def expand_haenam_execution_weights(base_weights, as_of_date):
-    """Faber A 신호 비중을 해남 A 실제 집행 비중으로 변환한다."""
+def expand_haenam_execution_weights(base_weights, as_of_date, kr_weights=None):
+    """Faber A 신호 비중을 해남 A 실제 집행 비중으로 변환한다.
+    kr_weights로 한국주식 슬롯 집행 비중을 바꿀 수 있다(기본: 삼전/하닉 50:50)."""
+    if kr_weights is None:
+        kr_weights = {"samsung": 0.5, "hynix": 0.5}
+    kr_samsung = float(kr_weights.get("samsung", 0.0))
+    kr_hynix = float(kr_weights.get("hynix", 0.0))
+    kr_total = kr_samsung + kr_hynix
     out = {}
     for asset, weight in (base_weights or {}).items():
         w = float(weight or 0.0)
         if w <= 0:
             continue
         if asset == KR_STOCK_MIX_ASSET:
-            out[HAENAM_SAMSUNG_NAME] = out.get(HAENAM_SAMSUNG_NAME, 0.0) + w * 0.5
-            out[HAENAM_HYNIX_NAME] = out.get(HAENAM_HYNIX_NAME, 0.0) + w * 0.5
+            if kr_total > 0:
+                if kr_samsung > 0:
+                    out[HAENAM_SAMSUNG_NAME] = out.get(HAENAM_SAMSUNG_NAME, 0.0) + w * (kr_samsung / kr_total)
+                if kr_hynix > 0:
+                    out[HAENAM_HYNIX_NAME] = out.get(HAENAM_HYNIX_NAME, 0.0) + w * (kr_hynix / kr_total)
+            else:
+                out[asset] = out.get(asset, 0.0) + w
         elif asset == NASDAQ100_ASSET_NAME:
             targets = _nasdaq_active_execution_targets(as_of_date)
             out[NASDAQ100_ASSET_NAME] = out.get(NASDAQ100_ASSET_NAME, 0.0) + w * targets.get("base", 0.0)
@@ -3443,6 +3481,26 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         )
         if faber_active_nasdaq_kr_semi_data is not None else None
     )
+    faber_active_nasdaq_kr_samsung_data = build_faber_active_nasdaq_kr_single_data(
+        all_data, data_start, current_date, {"samsung": 1.0}, price_col=price_col
+    )
+    faber_active_nasdaq_kr_samsung_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_samsung_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if faber_active_nasdaq_kr_samsung_data is not None else None
+    )
+    faber_active_nasdaq_kr_hynix_data = build_faber_active_nasdaq_kr_single_data(
+        all_data, data_start, current_date, {"hynix": 1.0}, price_col=price_col
+    )
+    faber_active_nasdaq_kr_hynix_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_hynix_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if faber_active_nasdaq_kr_hynix_data is not None else None
+    )
     old_haenam_nav = (
         simulate_daily_nav_with_attribution(
             bt_start_date, current_date, IC, faber_active_nasdaq_kr_semi_data,
@@ -3658,6 +3716,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     st.markdown("#### 📐 전략 정량 비교")
     quant_labels = [
         FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL,
+        FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,
+        FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL,
         faber_base_label,
         old_haenam_label,
         "이전 전략(연속 모멘텀)",
@@ -3698,6 +3758,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     quant_strategies = {
         FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: faber_active_nasdaq_kr_semi_nav,
+        FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: faber_active_nasdaq_kr_samsung_nav,
+        FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL: faber_active_nasdaq_kr_hynix_nav,
         faber_base_label: nav_df,
         old_haenam_label: old_haenam_nav,
         "이전 전략(연속 모멘텀)": old_nav,
@@ -3733,6 +3795,18 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     calculate_faber_weights(d, all_data, mode='A', price_col=price_col), d
                 ) if faber_active_nasdaq_kr_semi_nav is not None else None
             ),
+            FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: (
+                lambda d: expand_haenam_execution_weights(
+                    calculate_faber_weights(d, all_data, mode='A', price_col=price_col), d,
+                    kr_weights={"samsung": 1.0}
+                ) if faber_active_nasdaq_kr_samsung_nav is not None else None
+            ),
+            FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL: (
+                lambda d: expand_haenam_execution_weights(
+                    calculate_faber_weights(d, all_data, mode='A', price_col=price_col), d,
+                    kr_weights={"hynix": 1.0}
+                ) if faber_active_nasdaq_kr_hynix_nav is not None else None
+            ),
             faber_base_label: lambda d: calculate_faber_weights(d, all_data, mode='A', price_col=price_col),
             old_haenam_label: (
                 lambda d: expand_haenam_execution_weights(
@@ -3763,6 +3837,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         }
         turnover_keys = {
             FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: haenam_turnover_keys,
+            FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: haenam_turnover_keys,
+            FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL: haenam_turnover_keys,
             faber_base_label: full_keys,
             old_haenam_label: haenam_turnover_keys,
             "이전 전략(연속 모멘텀)": full_keys,
