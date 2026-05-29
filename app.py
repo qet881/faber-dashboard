@@ -735,6 +735,11 @@ HAENAM_SAMSUNG_NAME = '삼성전자'
 HAENAM_HYNIX_NAME = 'SK하이닉스'
 HAENAM_TIME_NAME = 'TIME 나스닥100액티브'
 HAENAM_KOACT_NAME = 'KoAct 나스닥100액티브'
+# 나스닥100 슬롯 실제 집행 상품 전환일 ('이번 달 성과 참고' 표시 전용 — 공식 손익과는 무관).
+# 액티브(TIME/KoAct) 괴리율이 높아 현재는 패시브(미국나스닥100, 133690)로 집행 중.
+# 액티브 괴리율이 0.3% 미만으로 떨어져 전환한 '리밸런싱일'을 입력하면, 그 달 성과부터 액티브로 표시된다.
+# (리밸런싱일 = 전월 마지막 거래일. 그 날짜 이상부터 액티브로 잡힘.) None이면 계속 패시브로 표시.
+HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = None
 SAMSUNG_ELECTRONICS_TICKER = '005930'
 SK_HYNIX_TICKER = '000660'
 CHINA_CSI300_CNY_ASSET = '중국CSI300(위안화 노출)'
@@ -4672,6 +4677,12 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             # 리밸런싱 당시 해남 A 실제 집행 비중
             base_rebal_weights = calculate_faber_weights(rebal_date, all_data, mode='A', price_col=price_col)
             rebal_weights = expand_haenam_execution_weights(base_rebal_weights, rebal_date)
+            # 나스닥100 액티브 전환 전에는 참고 성과도 실제 보유분(패시브 미국나스닥100)으로 표시.
+            if (HAENAM_NASDAQ_ACTIVE_SWITCH_DATE is None
+                    or pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_NASDAQ_ACTIVE_SWITCH_DATE)):
+                passive_nasdaq_w = rebal_weights.pop(HAENAM_TIME_NAME, 0.0) + rebal_weights.pop(HAENAM_KOACT_NAME, 0.0)
+                if passive_nasdaq_w > 0:
+                    rebal_weights[NASDAQ100_ASSET_NAME] = rebal_weights.get(NASDAQ100_ASSET_NAME, 0.0) + passive_nasdaq_w
 
             monthly_rows = []
             total_pnl = 0.0
