@@ -3288,9 +3288,9 @@ def optimize_allocation(df_res, b_gen_kospi, b_gen_gold, b_isa_a, b_isa_b):
         if asset == '금현물':
             return ["금계좌"]
         if asset in (HAENAM_TIME_NAME, HAENAM_KOACT_NAME, NASDAQ100_ASSET_NAME, '미국나스닥100'):
-            return ["ISA_A", "ISA_B", "일반계좌"]
-        if asset in ('미국채30년', '한국채30년'):
             return ["ISA_B", "ISA_A", "일반계좌"]
+        if asset in ('미국채30년', '한국채30년'):
+            return ["ISA_A", "ISA_B", "일반계좌"]
         return ["일반계좌", "ISA_A", "ISA_B"]
 
     def _allocate(asset, target):
@@ -4903,7 +4903,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.subheader("🏦 3계좌 절세 최적화 리밸런싱")
-    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=삼성전자→SK하이닉스 / ISA_A=나스닥 액티브 우선 / ISA_B=채권 우선")
+    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=삼성전자→SK하이닉스 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
     if st.button("🚀 리밸런싱 목표 계산하기", type="primary"):
         with st.spinner("계산 중..."):
             final_df = optimize_allocation(
