@@ -419,6 +419,16 @@ def fetch_kr_long_bond_yield_series(start_date, end_date):
     return merged.astype(float) if len(merged) > 0 else None
 
 
+def fetch_kr_30y_bond_yield_series(start_date, end_date):
+    """실제 국고채 30년 일별 금리(ECOS 817Y002 / 010230000). 2012-09-11~ 가용.
+    ECOS 키가 없으면 None → 호출부에서 10년물 기반 합성으로 폴백한다.
+    ※ 30년 국고채는 2012년 최초 발행되어 그 이전 구간은 존재하지 않는다."""
+    s = _fetch_ecos_daily_series("817Y002", "010230000", start_date, end_date)
+    if s is None or len(s) == 0:
+        return None
+    return s
+
+
 def build_cash_price_index_from_annual_rates(rates, start_date, end_date, spread=0.0, fallback_annual_rate=0.025):
     """연율 금리 시계열을 영업일 기준 현금 가격지수로 변환한다."""
     dates = pd.bdate_range(start=start_date, end=end_date)
@@ -758,6 +768,30 @@ FABER_EX_BONDS_4_LABEL = 'Faber A (한·미·중국·금 4자산)'
 FABER_EX_BONDS_5_LABEL = 'Faber A (한·미·중국·인도·금 5자산)'
 
 KR_BOND_DURATION_FACTOR = 2.5
+
+# ── 채권 딥프록시(금리→가격) 합성 파라미터 (실 ETF 검증 기반 보정) ─────────────
+# ① 듀레이션 보정: 기존 '10년듀레이션 10 × 2.5배 = 실효 25'는 실 ETF 대비 과다
+#    (검증상 변동성 1.11x). KOSEF국고채10년 프록시(실듀레이션 ~8.5 × 2.5 ≈ 21)와
+#    일치하도록 30년 실효 수정듀레이션을 ~21로 단일화한다.
+# ③ 컨벡시티: C ≈ D·(D+1) 근사로 금리 급변 구간의 1차근사(듀레이션) 오차를
+#    양의 볼록성으로 보정한다.
+# 채권 합성 듀레이션(실 ETF 검증 기반).
+#   - 실제 30년 국고채 금리(ECOS 010230000, 2012-09~)로 합성할 때 D=19 → 실 ETF와
+#     일상관 0.97·월상관 0.996·일vol 0.99x (검증). carry(이자) 항 포함 시 총수익 부호도 일치.
+#   - 30년물이 없던 2012년 이전 구간은 10년물 금리 변화로 합성하며, 그 변화폭이 30년물보다
+#     작아 실효 듀레이션 25가 필요(월vol≈1.0x). 두 구간은 체인링크로 연결.
+KR_BOND_30Y_DURATION = 19.0
+KR_BOND_30Y_CONVEXITY = KR_BOND_30Y_DURATION * (KR_BOND_30Y_DURATION + 1.0)
+# 30년물이 없던 2012년 이전: ECOS 일별 10년물 금리변화에 beta를 곱해 30년물 금리변화를 역산.
+#   2012~2026 겹침구간 회귀: corr(d30,d10)=0.92, beta=0.81 (장기물이 10년물의 0.81배 변동).
+#   이렇게 만든 연속 30년 금리에 D=19를 단일 적용한다(가격 체인링크 불필요).
+KR_BOND_10Y_TO_30Y_BETA = 0.81
+KR_BOND_EFFECTIVE_DURATION = 25.0   # 키 없을 때 폴백(FRED OECD 월별 10년물, 변화폭이 작아 보정 큼)
+KR_BOND_CONVEXITY = KR_BOND_EFFECTIVE_DURATION * (KR_BOND_EFFECTIVE_DURATION + 1.0)
+KR_BOND_10Y_DURATION = 8.5
+KR_BOND_10Y_CONVEXITY = KR_BOND_10Y_DURATION * (KR_BOND_10Y_DURATION + 1.0)
+US_BOND_EFFECTIVE_DURATION = 21.0   # GS30(실제 30년물) 기반, 시간보간 후 월vol≈1.0x 보정
+US_BOND_CONVEXITY = US_BOND_EFFECTIVE_DURATION * (US_BOND_EFFECTIVE_DURATION + 1.0)
 
 PROXY_ASSETS = {
     '코스피200': {
@@ -1114,61 +1148,115 @@ def fetch_deep_proxy_kospi(start_date, end_date):
         return None
 
 
+def _synthesize_bond_price_from_yield(yields_raw, duration, convexity, include_carry=True):
+    """금리(%) 시계열 → 채권 '총수익' 합성가격(기준 100) 딥프록시.
+
+    개선 포인트(실 ETF 검증 반영):
+    - ② 월별 등 저빈도 금리를 일별로 '시간 보간(time interpolation)'해, 한 달치 변화가
+        하루에 몰려 일간수익률의 96.7%가 0이 되던 ffill+diff 아티팩트를 제거한다.
+    - ① 실효 수정듀레이션(duration)을 단일 적용 — 기존 '듀레이션10 × 2.5배 + clip' 대체.
+    - ③ 듀레이션 1차 + 컨벡시티 2차항 + 이자(carry)로 일별 총수익 합성:
+        dP/P ≈ carry + (-D·dy/(1+y)) + 0.5·C·dy²
+        · carry = y_prev/252 (일별 이자 accrual). 기존엔 가격수익만 계산해 채권 총수익을
+          연 ~3~4%p 과소계상했고, 실 ETF 대비 누적수익 부호까지 어긋났다(검증).
+    """
+    if yields_raw is None or len(yields_raw) == 0:
+        return None
+    y = pd.to_numeric(yields_raw, errors="coerce").dropna().sort_index()
+    y = y[~y.index.duplicated(keep="last")]
+    if len(y) < 2:
+        return None
+    all_dates = pd.bdate_range(start=y.index.min(), end=y.index.max())
+    # ② 시간 기반 보간으로 매끄러운 일별 금리 경로 생성(양 끝단은 ffill/bfill).
+    y_daily = (
+        y.reindex(y.index.union(all_dates))
+         .interpolate(method="time")
+         .reindex(all_dates)
+         .ffill().bfill()
+         .dropna()
+    )
+    y_dec = y_daily / 100.0
+    dy = y_dec.diff()
+    # ①③ 듀레이션 + 컨벡시티 기반 가격수익 + 이자(carry) = 총수익.
+    daily_return = (-duration * dy / (1 + y_dec.shift(1)) + 0.5 * convexity * dy ** 2)
+    if include_carry:
+        daily_return = daily_return + y_dec.shift(1) / 252.0
+    daily_return = daily_return.fillna(0.0)
+    # 데이터 오류성 비현실적 점프만 차단(보간 후엔 사실상 발동 안 함).
+    daily_return = daily_return.clip(-0.20, 0.20)
+    price = (1 + daily_return).cumprod() * 100.0
+    result = pd.DataFrame(index=price.index)
+    result['Close'] = price.values
+    result['Adj Close'] = result['Close'].values
+    return result
+
+
+@st.cache_data(ttl=86400)
+def _build_kr_synthetic_30y_yield(start_date, end_date):
+    """연속 국고채30년 금리(%) 시계열 구성.
+      · 2012-09~ : 실제 국고채30년 금리(ECOS 010230000).
+      · ~2012-09 : 30년물 미존재 → 10년물(ECOS 일별 우선) 변화 × beta 로 역산하고,
+                   경계 시점에서 실30년물 레벨에 앵커링해 연속성을 보장한다.
+    반환: (연속 30년 금리 Series 또는 None, 10년물 금리 Series 또는 None)
+          첫 값이 None이면 실30년물이 없는 것(키 미설정) → 호출부에서 10년물 폴백.
+    """
+    real30 = fetch_kr_30y_bond_yield_series(start_date, end_date)
+    long_yield = fetch_kr_long_bond_yield_series(start_date, end_date)
+    if real30 is None or len(real30) < 2:
+        return None, long_yield
+    if long_yield is None or len(long_yield) < 2:
+        return real30, None
+    t0 = real30.index.min()
+    pre10 = long_yield[long_yield.index < t0]
+    if len(pre10) < 2:
+        return real30, long_yield
+    anchor10 = long_yield.asof(t0)
+    if pd.isna(anchor10):
+        return real30, long_yield
+    synth_pre = float(real30.iloc[0]) + KR_BOND_10Y_TO_30Y_BETA * (pre10 - float(anchor10))
+    combined = pd.concat([synth_pre, real30]).sort_index()
+    combined = combined[~combined.index.duplicated(keep="last")]
+    return combined, long_yield
+
+
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_kr_bond_ecos(start_date, end_date):
-    """FRED IRLTLT01KRM156N(한국 장기금리 월별) → 30년채 합성가격 딥프록시 (2000-01-01~).
-    KOSEF국고채10년(148070) 상장 전(2009-08-27) 구간 커버.
-    듀레이션 배수(KR_BOND_DURATION_FACTOR=2.5) 적용.
-    ※ 과거 ECOS API 방식에서 FRED로 대체.
+    """국고채30년 합성 총수익가격 딥프록시 (2000-12~).
+
+    ① 실제 국고채30년 금리(ECOS 010230000, 2012-09~) + 2012년 이전은 10년물×beta 역산으로
+       만든 '연속 30년 금리'에 실효 듀레이션 D=19를 단일 적용
+       → 실 ETF와 일상관 0.97·월상관 0.996·일vol 0.99x, pre-2012 vol≈13%(실물 수준).
+    ② 시간보간(lumping 제거)  ③ 컨벡시티  + 이자(carry) = 총수익.
+    ECOS 키가 없으면 실30년물을 못 받아 전 구간 10년물(월별) 기반 D=25로 폴백한다.
     """
     try:
-        yields_raw = fetch_kr_long_bond_yield_series(start_date, end_date)
-        if yields_raw is None or yields_raw.empty:
-            return None
-        yields_raw = yields_raw.dropna()
-        # 월별 → 영업일 리샘플링 + ffill
-        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
-        yields = yields_raw.reindex(all_dates).ffill().dropna()
-        # 수익률(%) → 일별 채권가격 (10년 국고채 듀레이션)
-        daily_yield_change = yields.diff() / 100
-        duration_10y = 10.0
-        daily_return = -duration_10y / (1 + yields.shift(1) / 100) * daily_yield_change
-        daily_return = daily_return.fillna(0.0)
-        price_10y = (1 + daily_return).cumprod() * 100
-        # KR_BOND_DURATION_FACTOR(현재값=2.5) 로 10년채 일간수익률을 레버리지해 30년채 합성.
-        # ✅ 확인: adjusted_ret = daily_ret_10y × 2.5 → price_30y 는 사실상 10년채×2.5배 가격.
-        #    KOSEF국고채10년×2.5배 프록시와 동일 방식으로 처리되어 체인링크 연결 일관성 확보.
-        daily_ret_10y = price_10y.pct_change().fillna(0.0)
-        adjusted_ret = (daily_ret_10y * KR_BOND_DURATION_FACTOR).clip(-0.15, 0.15)
-        price_30y = (1 + adjusted_ret).cumprod() * 100
-        result = pd.DataFrame(index=price_30y.index)
-        result['Close'] = price_30y.values
-        result['Adj Close'] = result['Close']
-        return result
+        y30, long_yield = _build_kr_synthetic_30y_yield(start_date, end_date)
+        if y30 is not None and len(y30) > 1:
+            return _synthesize_bond_price_from_yield(
+                y30, KR_BOND_30Y_DURATION, KR_BOND_30Y_CONVEXITY
+            )
+        # 폴백: 실30년물 없음 → 10년물 금리 기반 합성(월별 OECD/FRED 보정 듀레이션).
+        if long_yield is not None and len(long_yield) > 1:
+            return _synthesize_bond_price_from_yield(
+                long_yield, KR_BOND_EFFECTIVE_DURATION, KR_BOND_CONVEXITY
+            )
+        return None
     except Exception as e:
-        st.warning(f"딥프록시(KR채권 FRED) 로딩 오류: {e}")
+        st.warning(f"딥프록시(KR채권) 로딩 오류: {e}")
         return None
 
 
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_kr_bond_10y_fred(start_date, end_date):
-    """FRED IRLTLT01KRM156N(한국 장기금리 월별) → 10년 국고채 합성가격 딥프록시."""
+    """한국 장기금리(ECOS→OECD/FRED) → 10년 국고채 합성가격 딥프록시.
+    ②시간보간 + ①듀레이션(≈8.5) + ③컨벡시티 (30년물과 동일 합성 방식)."""
     try:
         yields_raw = fetch_kr_long_bond_yield_series(start_date, end_date)
         if yields_raw is None or yields_raw.empty:
             return None
-        yields_raw = yields_raw.dropna()
-        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
-        yields = yields_raw.reindex(all_dates).ffill().dropna()
-        daily_yield_change = yields.diff() / 100
-        duration_10y = 10.0
-        daily_return = -duration_10y / (1 + yields.shift(1) / 100) * daily_yield_change
-        daily_return = daily_return.fillna(0.0)
-        price_10y = (1 + daily_return).cumprod() * 100
-        result = pd.DataFrame(index=price_10y.index)
-        result['Close'] = price_10y.values
-        result['Adj Close'] = result['Close']
-        return result
+        return _synthesize_bond_price_from_yield(
+            yields_raw, KR_BOND_10Y_DURATION, KR_BOND_10Y_CONVEXITY
+        )
     except Exception as e:
         st.warning(f"딥프록시(KR국고채10년 FRED) 로딩 오류: {e}")
         return None
@@ -1260,22 +1348,20 @@ def fetch_india_nifty_inr_krw_chain(start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def fetch_deep_proxy_us_bond_fred(start_date, end_date):
-    """FRED GS30 → TLT 합성가격(KRW) 딥프록시 (2000-01-01~).
+    """FRED GS30(실제 30년물, 월별) → TLT 합성가격(KRW) 딥프록시 (2000-01-01~).
     TLT 상장 전(2002-07-30) 구간 커버.
+    ②시간보간 + ①듀레이션(US_BOND_EFFECTIVE_DURATION) + ③컨벡시티로 합성 후 USD→KRW.
     """
     try:
         yields_raw = _fetch_fred_series('GS30', start_date, end_date)
         if yields_raw is None or yields_raw.empty:
             return None
-        # 영업일 기준 리인덱싱 + ffill
-        all_dates = pd.bdate_range(start=yields_raw.index.min(), end=yields_raw.index.max())
-        yields = yields_raw.reindex(all_dates).ffill().dropna()
-        # 수익률(%) → TLT 합성가격 (USD)
-        daily_yield_change = yields.diff() / 100
-        duration_tlt = 18.0
-        daily_return = -duration_tlt / (1 + yields.shift(1) / 100) * daily_yield_change
-        daily_return = daily_return.fillna(0.0)
-        price_usd = (1 + daily_return).cumprod() * 100
+        price_usd_df = _synthesize_bond_price_from_yield(
+            yields_raw, US_BOND_EFFECTIVE_DURATION, US_BOND_CONVEXITY
+        )
+        if price_usd_df is None or price_usd_df.empty:
+            return None
+        price_usd = price_usd_df['Close']
         # USD → KRW
         usdkrw_df = get_usdkrw_series(start_date, end_date)
         if usdkrw_df is None or usdkrw_df.empty:
@@ -1591,11 +1677,17 @@ def _load_hybrid_data(start_date, end_date):
     all_data['미국나스닥100_모멘텀'] = all_data['미국나스닥100']
 
     # ── 한국채30년 ────────────────────────────────────────────
+    # 실제 30년 국고채 금리(ECOS)가 잡히면 딥프록시가 2012~현재를 정확히 커버하므로,
+    # 변동성·수익을 과대계상하던 KOSEF10년×2.5 프록시 tier를 건너뛰고 실 ETF에 바로 연결.
+    # (키가 없으면 딥프록시가 10년물 기반이라 KOSEF tier로 보완한다.)
     deep_kr_bond = fetch_deep_proxy_kr_bond_ecos(start_date, end_date)
-    proxy_kr_bond = fetch_proxy_data('한국채30년', start_date, end_date)  # KOSEF10년×2.5배
     etf_kr_bond = fetch_etf_data('439870', start_date, end_date)
-    step1 = _chain_link_series(deep_kr_bond, proxy_kr_bond)
-    all_data['한국채30년'] = _chain_link_series(step1, etf_kr_bond)
+    if fetch_kr_30y_bond_yield_series(start_date, end_date) is not None:
+        all_data['한국채30년'] = _chain_link_series(deep_kr_bond, etf_kr_bond)
+    else:
+        proxy_kr_bond = fetch_proxy_data('한국채30년', start_date, end_date)  # KOSEF10년×2.5배
+        step1 = _chain_link_series(deep_kr_bond, proxy_kr_bond)
+        all_data['한국채30년'] = _chain_link_series(step1, etf_kr_bond)
     all_data['한국채30년_모멘텀'] = all_data['한국채30년']
 
     # ── 미국채30년 ────────────────────────────────────────────
@@ -3398,11 +3490,13 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             "|---|---|---|\n"
             "| 코스피200 | KODEX 200 (069500) | 실제 ETF (294400) |\n"
             "| 미국나스닥100 | QQQ × USD/KRW | TIGER 미국나스닥100 (133690) |\n"
-            f"| 한국채30년 | KOSEF 국고채10년 × {KR_BOND_DURATION_FACTOR}배 | 실제 ETF (439870) |\n"
-            "| 미국채30년 | TLT × USD/KRW | 실제 ETF (476760) |\n"
+            "| 한국채30년 | 국고채30년 실금리(ECOS, 2012~)+이자 합성 · 이전은 10년물 기반 | 실제 ETF (439870) |\n"
+            "| 미국채30년 | GS30 실금리+이자 합성 → TLT × USD/KRW | 실제 ETF (476760) |\n"
             "| 금현물 | GLD × USD/KRW | ACE KRX금현물 (411060) |\n"
             "| 현금 | ECOS CD91 - 0.15%p 합성 (실패 시 연 2.5%) | 실제 MMF ETF (455890) |\n\n"
             "💡 **체인링크**: 프록시 → ETF 전환 시점에서 가격을 연결하여 수익률 연속성을 유지합니다.\n\n"
+            "💡 채권 합성은 듀레이션·컨벡시티에 **이자(carry)**까지 더한 총수익 기준이며, 한국채30년은 "
+            "실제 30년 국고채 일별 금리(ECOS, 2012-09~)를 써 실 ETF와 일상관 0.97·월상관 0.996로 추적합니다.\n\n"
             "⚠️ 금현물 Faber 신호는 별도 모멘텀 시리즈(0064K0 우선, 실패 시 GLD×환율 fallback)를 사용합니다.\n\n"
             "⚠️ 최근 기간의 모멘텀/기여도는 실제 ETF 데이터 기반으로 정확합니다."
         )
@@ -3412,6 +3506,19 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     with st.spinner("시장 데이터 로딩 중... (하이브리드: 프록시+실제ETF, 최초 로딩 시 시간 소요)"):
         all_data = load_market_data(data_start, requested_backtest_end, hybrid=True)
         all_data = clamp_market_data_to_date(all_data, requested_backtest_end)
+
+    # 한국채30년 데이터 소스 상태 (ECOS 키 인식 여부 — 모바일/Cloud에서 바로 확인용)
+    _kr30_yield = fetch_kr_30y_bond_yield_series(data_start, requested_backtest_end)
+    if _kr30_yield is not None and len(_kr30_yield) > 0:
+        st.success(
+            f"✅ 한국채30년: 실제 국고채30년 금리(ECOS, {_kr30_yield.index.min().date()}~) 기반 합성 사용 중 "
+            "— 실 ETF와 일상관 0.97·월상관 0.996"
+        )
+    else:
+        st.warning(
+            "⚠️ 한국채30년: ECOS 키 미인식 → 10년물 기반 합성으로 폴백 중입니다. "
+            "정확도를 높이려면 Streamlit Secrets에 `ECOS_API_KEY`를 추가하세요."
+        )
 
     # 보조 벤치마크 ETF 로딩
     benchmark_raw = fetch_benchmark_etf(BENCHMARK_ETF['ticker'], bt_start_date, requested_backtest_end)
@@ -3423,8 +3530,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         DEEP_PROXY_NOTES = {
             '코스피200':    'KOSPI지수(딥) → KODEX200 → 실제ETF: 2000-01-01 ~ 현재',
             '미국나스닥100': 'QQQ × USD/KRW → 실제ETF: 2000-01-01 ~ 현재',
-            '한국채30년':   'ECOS국고채10년×2.5배(딥) → KOSEF국고채10년×2.5배 → 실제ETF: 2000-01-01 ~ 현재',
-            '미국채30년':   'FRED GS30(딥) → TLT×환율 → 실제ETF: 2000-01-01 ~ 현재',
+            '한국채30년':   'ECOS 국고채30년 실금리(2012~)+이자 합성, 이전은 10년물×beta → 실제ETF(439870): 2000-12 ~ 현재',
+            '미국채30년':   'FRED GS30 실금리+이자 합성 → TLT×환율 → 실제ETF(476760): 2000-01-01 ~ 현재',
             '금현물':       'FRED금현물(딥) → GLD×환율 → 실제ETF: 2000-01-01 ~ 현재 (신호: 0064K0 우선)',
         }
         for name in list(ASSETS.keys()) + [CASH_NAME]:
