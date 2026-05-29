@@ -122,11 +122,14 @@ def _standardize_price_df(raw):
 
     out = pd.DataFrame(index=pd.to_datetime(df.index).tz_localize(None))
     out["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-    out["Adj Close"] = (
-        pd.to_numeric(df["Adj Close"], errors="coerce")
-        if "Adj Close" in df.columns
-        else out["Close"]
-    )
+    if "Adj Close" in df.columns:
+        adj_close = pd.to_numeric(df["Adj Close"], errors="coerce")
+        # Some Korean yfinance histories contain impossible non-positive adjusted
+        # prices in old corporate-action periods. Keep those dates tradable by
+        # falling back to the raw close only where the adjusted value is invalid.
+        out["Adj Close"] = adj_close.where(adj_close > 0, out["Close"])
+    else:
+        out["Adj Close"] = out["Close"]
     out = out.dropna(subset=["Close"])
     return out if not out.empty else None
 
@@ -293,6 +296,37 @@ def _fetch_fred_series(series_id, start_date, end_date):
     return _fetch_fred_series_csv(series_id, start_ts, end_ts)
 
 
+@st.cache_data(ttl=86400)
+def _fetch_oecd_finmarket_series(ref_area, measure, start_date, end_date, freq="M"):
+    """Fetch OECD Data Explorer financial-market CSV series without an API key."""
+    try:
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        start_period = start_ts.strftime("%Y-%m") if freq == "M" else start_ts.strftime("%Y")
+        end_period = end_ts.strftime("%Y-%m") if freq == "M" else end_ts.strftime("%Y")
+        key = f"{ref_area}.{freq}.{measure}.PA....."
+        url = (
+            "https://sdmx.oecd.org/public/rest/data/"
+            f"OECD.SDD.STES,DSD_STES@DF_FINMARK,4.0/{key}"
+            f"?startPeriod={start_period}&endPeriod={end_period}&format=csvfile"
+        )
+        response = requests.get(url, headers={"User-Agent": "faber-dashboard/1.0"}, timeout=20)
+        if response.status_code != 200 or not response.text.strip():
+            return None
+        raw = pd.read_csv(io.StringIO(response.text))
+        if "TIME_PERIOD" not in raw.columns or "OBS_VALUE" not in raw.columns:
+            return None
+        dates = pd.to_datetime(raw["TIME_PERIOD"].astype(str) + "-01", errors="coerce")
+        values = pd.to_numeric(raw["OBS_VALUE"], errors="coerce")
+        s = pd.Series(values.values, index=dates).dropna()
+        s = s[(s.index >= start_ts) & (s.index <= end_ts)]
+        if s.empty:
+            return None
+        return s[~s.index.duplicated(keep="last")].sort_index().astype(float)
+    except Exception:
+        return None
+
+
 def _get_config_secret(*names):
     for name in names:
         try:
@@ -365,6 +399,11 @@ def fetch_kr_long_bond_yield_series(start_date, end_date):
             first_10y = pieces[0].index.min()
             ecos_3y = ecos_3y[ecos_3y.index < first_10y]
         pieces.insert(0, ecos_3y.rename("yield"))
+
+    if not pieces:
+        oecd_yield = _fetch_oecd_finmarket_series("KOR", "IRLT", start_date, end_date)
+        if oecd_yield is not None and len(oecd_yield) > 0:
+            pieces.append(oecd_yield.rename("yield"))
 
     if not pieces:
         fred_yield = _fetch_fred_series("IRLTLT01KRM156N", start_date, end_date)
@@ -937,7 +976,8 @@ def fetch_etf_data(ticker, start_date, end_date, is_momentum=False):
                 return momentum_df
 
             return synthetic_df
-        df = _read_kr_market_data(ticker, start_date, end_date, prefer_long_history=False)
+        prefer_long_history = ticker in (SAMSUNG_ELECTRONICS_TICKER, SK_HYNIX_TICKER)
+        df = _read_kr_market_data(ticker, start_date, end_date, prefer_long_history=prefer_long_history)
         if df is None or len(df) == 0: return None
         df = df[~df.index.duplicated(keep='last')].sort_index()
         if 'Close' not in df.columns: return None
@@ -3450,6 +3490,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         return primary_asset_display_names.get(asset, asset)
 
     def _major_asset_display_name(asset):
+        if primary_is_haenam and asset == KR_STOCK_MIX_ASSET:
+            return "삼성전자/하이닉스(코스피 신호)"
         return "나스닥100" if asset == NASDAQ100_ASSET_NAME else asset
 
     def _active_contribution_cols(df, cols, threshold=0.005):
