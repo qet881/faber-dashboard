@@ -1,0 +1,8 @@
+﻿date,kr_weight,samsung_weight,hynix_weight,us_weight,defense_weight,kr_on,us_on,kr_state,samsung_state,hynix_state,us_state,kr_raw_stage,us_raw_stage,stage_change
+2015-12-31,0.2,,,0.2,0.6000000000000001,False,True,1,,,0,1,0,1.0
+2018-10-31,0.2,,,0.0,0.8,False,False,1,,,0,1,0,1.0
+2020-02-29,0.2,,,0.0,0.8,False,False,1,,,0,1,0,1.0
+2022-06-30,0.2,,,0.0,0.8,False,False,1,,,0,1,0,1.0
+2022-09-30,0.45,,,0.0,0.55,False,False,3,,,0,3,0,2.0
+2023-10-31,0.2,,,0.0,0.8,False,False,1,,,0,1,0,1.0
+2024-10-31,0.2,,,0.2,0.6000000000000001,False,True,1,,,0,1,0,1.0
