@@ -757,7 +757,7 @@ HAENAM_KOACT_NAME = 'KoAct 나스닥100액티브'
 #   - 코드가 쓰는 가격은 ETF '시장 종가'(데이터피드)이지 사용자의 체결가가 아니다. 따라서 전환에 필요한 건 '날짜'뿐.
 #     체결가/체결일은 .codex-private 저널 기록용이며 이 계산에는 들어가지 않는다.
 #   - 공식 손익(계좌 총액 − 기준 − 현금흐름)과는 무관. 이 상수는 참고 표시만 바꾼다.
-# 상세 런북: docs/nasdaq-active-switch-runbook.md
+# 상세 운용 메모: .codex-private/investment_memory.md
 HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = None
 SAMSUNG_ELECTRONICS_TICKER = '005930'
 SK_HYNIX_TICKER = '000660'

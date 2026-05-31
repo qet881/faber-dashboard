@@ -380,18 +380,6 @@ def max_after_first_buy_drop(nav: pd.DataFrame, weights: pd.DataFrame, side: str
     return later["nav"].min() / base - 1.0
 
 
-def format_pct(x: float) -> str:
-    if not np.isfinite(x):
-        return "-"
-    return f"{x:.2%}"
-
-
-def format_num(x: float) -> str:
-    if not np.isfinite(x):
-        return "-"
-    return f"{x:.2f}"
-
-
 def make_configs() -> list[BacktestConfig]:
     configs = []
     kr_execs = {
@@ -430,63 +418,6 @@ def make_configs() -> list[BacktestConfig]:
                 )
             )
     return configs
-
-
-def write_report(summary: pd.DataFrame, out_path: Path, start: str, end: str) -> None:
-    best = summary.sort_values(["cagr", "mdd"], ascending=[False, False]).head(12)
-    stable = summary.sort_values(["mdd", "cagr"], ascending=[False, False]).head(12)
-    by_kr = summary.groupby("kr_exec")[["cagr", "mdd", "sharpe", "final_nav"]].mean().sort_values("cagr", ascending=False)
-    by_rule = summary.groupby("rule")[["cagr", "mdd", "sharpe", "final_nav"]].mean().sort_values("cagr", ascending=False)
-
-    def table(df: pd.DataFrame, cols: list[str]) -> str:
-        view = df[cols].copy()
-        for col in ["cagr", "mdd", "vol", "total_return"]:
-            if col in view:
-                view[col] = view[col].map(format_pct)
-        for col in ["final_nav", "sharpe"]:
-            if col in view:
-                view[col] = view[col].map(format_num)
-        header = "| " + " | ".join(view.columns) + " |"
-        sep = "| " + " | ".join(["---"] * len(view.columns)) + " |"
-        body = [
-            "| " + " | ".join(str(v) for v in row) + " |"
-            for row in view.itertuples(index=False, name=None)
-        ]
-        return "\n".join([header, sep, *body])
-
-    lines = [
-        "# 공포분할매수 백테스트 초안",
-        "",
-        f"- 기간: {start} ~ {end}",
-        "- 월말 종가로 신호를 계산하고 다음 달 수익률에 적용",
-        "- 기본 구조: 한국 20%, 미국 20%, 한국 추가 25%, 미국 추가 25%, 잔여 방어 10% 포함",
-        "- 한국 공포 신호는 코스피200 기준, 미국 집행은 TIGER 미국나스닥100 기준",
-        "- 방어자산 cash는 현금 0% 수익률, basket은 GLD/TLT/현금 1:1:1 월간 리밸런싱 프록시",
-        "",
-        "## CAGR 상위",
-        "",
-        table(best, ["name", "kr_exec", "rule", "defense", "final_nav", "cagr", "mdd", "sharpe"]),
-        "",
-        "## MDD 방어 상위",
-        "",
-        table(stable, ["name", "kr_exec", "rule", "defense", "final_nav", "cagr", "mdd", "sharpe"]),
-        "",
-        "## 한국 매수 대상 평균",
-        "",
-        table(by_kr.reset_index(), ["kr_exec", "final_nav", "cagr", "mdd", "sharpe"]),
-        "",
-        "## 공포 기준 평균",
-        "",
-        table(by_rule.reset_index(), ["rule", "final_nav", "cagr", "mdd", "sharpe"]),
-        "",
-        "## 해석 메모",
-        "",
-        "- 이 결과는 룰 후보를 줄이기 위한 초안이다. 실제 해남A 앱의 채권/금 프록시 및 세금/비용과는 다를 수 있다.",
-        "- `annual5_live`는 미국 신호만 진행 중 연봉 5년선 비슷한 기준을 쓰고, 한국은 월봉선 기준을 쓴다.",
-        "- 다음 단계에서는 상위 후보를 기존 `app.py`의 해남A 데이터 로더와 연결해 동일 프록시로 재검증하는 것이 좋다.",
-        "",
-    ]
-    out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
@@ -568,14 +499,7 @@ def main() -> None:
             )
         ].copy()
         focus_events.to_csv(out_dir / "semi50_or_cash_events.csv", encoding="utf-8-sig")
-    write_report(
-        pd.concat([summary, baselines.assign(kr_exec="baseline", rule="baseline", defense="baseline")], ignore_index=True),
-        out_dir / "report.md",
-        summary["start"].iloc[0] if not summary.empty else args.start,
-        summary["end"].iloc[0] if not summary.empty else "",
-    )
     print(f"Wrote {out_dir / 'summary.csv'}")
-    print(f"Wrote {out_dir / 'report.md'}")
 
 
 if __name__ == "__main__":
