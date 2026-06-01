@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -679,7 +680,7 @@ DEFAULT_ISA_B_BAL     = 82_647_962
 DEFAULT_BALANCE_VERSION = "2026-05-29-final2"
 
 # 미확정 예정 입금 — NAV 계산에 반영되지 않음. 확정 시 CONFIRMED 으로 이동.
-PERSONAL_CASH_FLOWS_PENDING = {
+PERSONAL_CASH_FLOWS_PENDING: dict[str, Any] = {
 }
 # 확정 입금 — NAV 계산에 반영됨. 입금 확정마다 여기에 추가.
 PERSONAL_CASH_FLOWS_CONFIRMED = {
@@ -3693,7 +3694,6 @@ def build_comparison_table(strategies_dict, initial_capital):
         val, ret, mdd, cagr = calculate_performance_metrics(nav_df, initial_capital)
         sharpe = calculate_sharpe_ratio(nav_df)
         sortino = calculate_sortino_ratio(nav_df)
-        m_mdd = calculate_monthly_mdd(nav_df)
         rows.append({
             "전략": name,
             "CAGR": f"{cagr*100:.2f}%" if cagr is not None else "-",
@@ -4145,10 +4145,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
         bt_start_date, current_date, IC, all_data, price_col=price_col)
-    kr_3asset_data = build_kr_stock_bond_cash_avg_momentum_data(all_data, bt_start_date, current_date)
-    kr_3asset_nav = simulate_kr_stock_bond_cash_avg_momentum_strategy(
-        bt_start_date, current_date, IC, kr_3asset_data, price_col=price_col
-    )
     faber_nasdaq_active_data = build_faber_nasdaq_active_execution_data(
         all_data, data_start, current_date, price_col=price_col
     )
@@ -4307,19 +4303,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     faber_ex5_data = build_faber_ex_bonds_strategy_data(
         all_data, bt_start_date, current_date, include_china=True, include_india=True
     )
-    faber_ex3_nav = simulate_faber_subset_strategy(
-        bt_start_date, current_date, IC, faber_ex3_data, faber_ex3_assets, price_col=price_col
-    )
-    faber_ex4_nav = simulate_faber_subset_strategy(
-        bt_start_date, current_date, IC, faber_ex4_data, faber_ex4_assets, price_col=price_col
-    )
-    faber_ex5_nav = simulate_faber_subset_strategy(
-        bt_start_date, current_date, IC, faber_ex5_data, faber_ex5_assets, price_col=price_col
-    )
 
     # 동일비중 B&H
     static_nav = simulate_static_benchmark(bt_start_date, current_date, IC, all_data, price_col=price_col)
-    benchmark_nav = build_benchmark_etf_returns(benchmark_raw, nav_df, IC)
 
     # ALLW (US ETF) × USD/KRW 벤치마크 로딩
     allw_nav = None
@@ -5003,7 +4989,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 top_positions = []
                 for _, row in df_filt.iterrows():
                     pos_sum = sum(max(0, row[ac]) for ac in asset_cols)
-                    neg_sum = abs(sum(min(0, row[ac]) for ac in asset_cols))
                     top_positions.append(max(pos_sum, 0.5) + 0.6)  # 바 위 여백
                 fig_fa.add_trace(go.Scatter(x=df_filt["date"], y=top_positions, mode="text",
                     text=[f"{v:+.2f}pp" for v in df_filt["합계"]], textposition="top center",
@@ -5248,15 +5233,18 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             all_data, data_start, current_date, price_col=price_col
         )
         haenam_price_data = get_haenam_live_price_data(all_data, data_start, current_date)
+    live_comparison_label = FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL
     if haenam_strategy_data is None:
         st.warning("해남 A 집행 데이터가 부족해 실전 성과 NAV는 Faber A 기준으로 임시 계산합니다.")
         haenam_strategy_data = all_data
+        live_comparison_label = "Faber A"
 
     # 역대 백테스트 MDD 계산 (해남 A 기준, 위에서 로딩한 데이터 재사용)
+    live_backtest_initial_capital = 10_000_000
     with st.spinner("📊 역대 MDD 계산 중 (해남 A)..."):
-        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, 10_000_000, haenam_strategy_data,
+        bt_nav_full = simulate_faber_strategy(bt_start_date, current_date, live_backtest_initial_capital, haenam_strategy_data,
             mode='A', buffer_df=None, price_col=price_col)
-        bt_mdd_historical = calculate_performance_metrics(bt_nav_full, 10_000_000)[2] if bt_nav_full is not None else None
+        bt_mdd_historical = calculate_performance_metrics(bt_nav_full, live_backtest_initial_capital)[2] if bt_nav_full is not None else None
 
     st.subheader("📊 성과 분석")
     st.markdown("#### 💼 나의 투자 성과")
@@ -5269,7 +5257,6 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         performance_base_date,
     )
     performance_base_date_str = pd.Timestamp(performance_base_date).strftime('%Y-%m-%d')
-    realized_return_pct = (hist_profit / init_capital) * 100 if init_capital > 0 else 0.0
     recorded_principal_gap = current_total_assets - cumulative_principal
     recorded_return_on_principal = recorded_principal_gap / cumulative_principal if cumulative_principal > 0 else 0.0
     p_mdd_daily, p_mdd_monthly, p_peak, p_valley = None, None, None, None
@@ -5437,13 +5424,11 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 st.markdown("##### 참고: 자산별 가격변동 추정")
                 cols_m = st.columns(len(monthly_rows) + 1)
                 for i, row in enumerate(monthly_rows):
-                    delta_color = "normal"
                     cols_m[i].metric(
                         label=row["자산"],
                         value=f"{row['수익률']:+.2f}%",
                         delta=f"{row['손익(원)']:+,.0f}원",
                     )
-                total_color = "🟢" if total_pnl >= 0 else "🔴"
                 cols_m[-1].metric(
                     label="📊 참고 합계",
                     value=f"{total_pnl:+,.0f}원",
@@ -5690,8 +5675,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     render_requested_static_portfolio_backtests(
-        requested_backtest_end, IC, price_col=price_col,
-        comparison_nav=primary_nav_df, comparison_label=primary_label,
+        current_date, live_backtest_initial_capital, price_col=price_col,
+        comparison_nav=bt_nav_full, comparison_label=live_comparison_label,
         collapsed=True,
     )
 
@@ -5806,7 +5791,6 @@ def mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_ca
         # 확률 테이블
         st.markdown("---")
         st.subheader("🎯 핵심 확률")
-        loss_prob = (final_values < sim_capital).mean() * 100
         targets = [
             (sim_capital, "원금 이상", "원금 손실 확률"),
             (sim_capital * 1.2, "1.2배 이상", None),
@@ -5977,13 +5961,13 @@ def main():
             jeon_rate = re_jeon / re_sale * 100
             # 기본 신호 단계
             if jeon_rate >= 80:
-                base_signal, base_color = "🔵 강력 매수", "blue"
+                base_signal = "🔵 강력 매수"
             elif jeon_rate >= 75:
-                base_signal, base_color = "🟢 적극 매수", "green"
+                base_signal = "🟢 적극 매수"
             elif jeon_rate >= 70:
-                base_signal, base_color = "🟡 매수 고려 가능", "orange"
+                base_signal = "🟡 매수 고려 가능"
             else:
-                base_signal, base_color = "🔴 매수 금지", "red"
+                base_signal = "🔴 매수 금지"
 
             # 추이 상승중이면 한 단계 상향
             signal_labels = ["🔴 매수 금지", "🟡 매수 고려 가능", "🟢 적극 매수", "🔵 강력 매수"]

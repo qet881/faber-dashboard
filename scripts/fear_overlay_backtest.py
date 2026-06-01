@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -433,16 +433,16 @@ def main() -> None:
     monthly = to_monthly(daily)
     series = build_series(monthly)
 
-    rows = []
-    nav_outputs = {}
-    weight_outputs = {}
+    rows: list[dict[str, Any]] = []
+    nav_outputs: dict[str, pd.DataFrame] = {}
+    weight_outputs: dict[str, pd.DataFrame] = {}
     for cfg in make_configs():
         try:
             nav, weights = simulate(series, cfg, args.start)
         except Exception as exc:
             print(f"skip {cfg.name}: {exc}")
             continue
-        m = metrics(nav)
+        m: dict[str, Any] = metrics(nav)
         m.update(
             {
                 "name": cfg.name,
