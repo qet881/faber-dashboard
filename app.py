@@ -5233,11 +5233,9 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             all_data, data_start, current_date, price_col=price_col
         )
         haenam_price_data = get_haenam_live_price_data(all_data, data_start, current_date)
-    live_comparison_label = FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL
     if haenam_strategy_data is None:
         st.warning("해남 A 집행 데이터가 부족해 실전 성과 NAV는 Faber A 기준으로 임시 계산합니다.")
         haenam_strategy_data = all_data
-        live_comparison_label = "Faber A"
 
     # 역대 백테스트 MDD 계산 (해남 A 기준, 위에서 로딩한 데이터 재사용)
     live_backtest_initial_capital = 10_000_000
@@ -5672,13 +5670,6 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         ex.to_excel(writer, sheet_name="Haenam_A_리밸런싱", index=False)
     st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"HaenamA_리밸런싱_{current_dt.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-
-    st.markdown("---")
-    render_requested_static_portfolio_backtests(
-        current_date, live_backtest_initial_capital, price_col=price_col,
-        comparison_nav=bt_nav_full, comparison_label=live_comparison_label,
-        collapsed=True,
-    )
 
 
 # ==============================
