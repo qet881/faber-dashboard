@@ -92,7 +92,13 @@ def _read_fdr_with_fallback(ticker, start_date, end_date):
 
     for symbol in candidates:
         try:
-            df = fdr.DataReader(symbol, start_date, end_date)
+            q_end = end_date
+            if isinstance(symbol, str) and symbol.endswith(".KS"):
+                # fdr→Yahoo는 end를 배타적으로 처리해 마지막 요청일을 빠뜨린다.
+                # 알파벳 포함 KRX 티커(0193G0·0064K0·0015B0 등)는 .KS(야후)로만 받으므로
+                # +1일 해서 최신 거래일을 포함시킨다. (_read_yfinance_history와 동일한 보정)
+                q_end = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+            df = fdr.DataReader(symbol, start_date, q_end)
             if df is not None and len(df) > 0:
                 return df
         except Exception:
@@ -768,7 +774,7 @@ KOACT_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2026-05-07')  # 효력발생일 
 # 상세 운용 메모: .codex-private/investment_memory.md
 HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = None
 # 한국주식 슬롯 코스피 액티브 전환일 ('이번 달 성과 참고' 표시 전용 — 공식 손익과는 무관).
-# 현재는 삼성전자/SK하이닉스 50:50 집행. 전환 후에는 TIME/KoAct 코스피액티브 50:50.
+# 2026-06-01 TIME/KoAct 코스피액티브 50:50로 전환 완료(이전: 삼성전자/SK하이닉스 50:50).
 #   - 나스닥 패시브→액티브 전환일과 같은 날 한 번에 옮기는 것을 기준으로 한다.
 #   - 사용자가 전환일(=코스피액티브 매수일, 보통 월말 거래일)을 주면 아래 None을 그 날짜로 바꾼다.
 #     예: pd.Timestamp('2026-06-30'). rebal_date < 이 날짜면 삼전/하닉, >= 이면 코스피액티브로 참고 표시.
@@ -776,7 +782,7 @@ HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = None
 #   - 체결가/수량은 .codex-private 저널 기록용. 이 상수는 참고 표시만 바꾼다.
 #   - 전환 시 이 상수와 함께 아래 캡션의 '삼성전자/SK하이닉스' 문구도 코스피액티브로 같이 바꾼다.
 # 상세: .codex-private/investment_memory.md·journal.md (2026-05-31 한국 슬롯 전환)
-HAENAM_KR_ACTIVE_SWITCH_DATE = None
+HAENAM_KR_ACTIVE_SWITCH_DATE = pd.Timestamp('2026-06-01')
 SAMSUNG_ELECTRONICS_TICKER = '005930'
 SK_HYNIX_TICKER = '000660'
 CHINA_CSI300_CNY_ASSET = '중국CSI300(위안화 노출)'
@@ -4913,6 +4919,28 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 if passive_nasdaq_w > 0:
                     rebal_weights[NASDAQ100_ASSET_NAME] = rebal_weights.get(NASDAQ100_ASSET_NAME, 0.0) + passive_nasdaq_w
 
+            # ── [전환월 임시 특례] 한국 슬롯 삼전/하닉 → 코스피액티브 (2026-06-01 집행) ──
+            # 이번 참고 기간(rebal_date=전월 말 5/29)에 전환일(6/1)이 끼어 있어, 삼전/하닉은 매도가에
+            # 동결(청산익 고정)하고 코스피액티브 2종은 매수가부터 시장 추적으로 나눠 표시한다.
+            # 체결가는 이 '참고' 표시 전용이며 공식 손익(계좌총액 기준)과 무관하다.
+            # ※ 6/30 리밸 후에는 rebal_date >= 전환일이라 이 블록을 안 타고 코스피액티브만 자동 표시됨 → 그때 이 블록 삭제.
+            kr_freeze_px = {}        # 삼전/하닉 매도가 동결 (px_e 대체)
+            kr_active_entry_px = {}  # 코스피액티브 매수가 시작 (px_s 대체)
+            if (HAENAM_KR_ACTIVE_SWITCH_DATE is not None
+                    and pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_KR_ACTIVE_SWITCH_DATE) <= pd.Timestamp(current_date)):
+                kr_freeze_px = {
+                    HAENAM_SAMSUNG_NAME: 349500.0,   # 2026-06-01 매도 체결가 (98주)
+                    HAENAM_HYNIX_NAME: 2364000.0,    # 2026-06-01 매도 체결가 (14주)
+                }
+                kr_active_entry_px = {
+                    HAENAM_KR_TIME_NAME: 34160.0,    # 2026-06-01 매수가 (981주)
+                    HAENAM_KR_KOACT_NAME: 11260.0,   # 2026-06-01 매수가 (2,973주)
+                }
+                kr_slot_w = rebal_weights.get(HAENAM_SAMSUNG_NAME, 0.0) + rebal_weights.get(HAENAM_HYNIX_NAME, 0.0)
+                if kr_slot_w > 0:
+                    rebal_weights[HAENAM_KR_TIME_NAME] = kr_slot_w / 2.0
+                    rebal_weights[HAENAM_KR_KOACT_NAME] = kr_slot_w / 2.0
+
             monthly_rows = []
             total_pnl = 0.0
             asset_labels = [k for k, v in rebal_weights.items() if v >= 0.001]
@@ -4927,13 +4955,17 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 else:
                     px_s = get_price_at_date(haenam_price_data.get(an), rebal_date, price_col=price_col)
                     px_e = get_price_at_date(haenam_price_data.get(an), current_date, price_col=price_col)
+                    if an in kr_active_entry_px:
+                        px_s = kr_active_entry_px[an]   # 코스피액티브: 매수가부터 시장 추적
+                    if an in kr_freeze_px:
+                        px_e = kr_freeze_px[an]          # 삼전/하닉: 매도가에 동결(청산익 고정)
                 if not px_s or px_s <= 0 or not px_e or px_e <= 0:
                     continue
                 ret = (px_e / px_s) - 1.0
                 pnl = alloc_won * ret
                 total_pnl += pnl
                 monthly_rows.append({
-                    "자산": an,
+                    "자산": f"{an}(매도청산)" if an in kr_freeze_px else an,
                     "비중": f"{w*100:.0f}%",
                     "배분금액": f"{alloc_won:,.0f}원",
                     "기준가(리밸)": f"{px_s:,.2f}",
@@ -4988,7 +5020,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
         st.caption(
             f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
-            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
+            f"코스피200 ON은 TIME/KoAct 코스피액티브, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f}{traded_txt})"
         )
@@ -4997,21 +5029,21 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         age_txt = f"{int(age_min):d}분 전 값" if age_min is not None else "최근 성공값"
         st.caption(
             f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
-            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
+            f"코스피200 ON은 TIME/KoAct 코스피액티브, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 0064K0 최근 성공값({age_txt}) 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f})"
         )
     elif gold_source == "GC_FX_REALTIME":
         st.caption(
             f"**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. "
-            f"코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
+            f"코스피200 ON은 TIME/KoAct 코스피액티브, 나스닥100 ON은 TIME/KoAct로 집행합니다. "
             f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
             f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})"
         )
     elif gold_stable_mode:
-        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
+        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 TIME/KoAct 코스피액티브, 나스닥100 ON은 TIME/KoAct로 집행합니다. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
     else:
-        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 삼성전자/SK하이닉스, 나스닥100 ON은 TIME/KoAct로 집행합니다. 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
+        st.caption("**해남 A 룰**: 신호는 Faber A와 동일하게 12개월 고점 -5% 이내면 ON. 코스피200 ON은 TIME/KoAct 코스피액티브, 나스닥100 ON은 TIME/KoAct로 집행합니다. 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
     col_rt1, col_rt2 = st.columns([1, 4])
     with col_rt1:
         if st.button("🔄 신호표 새로고침", help="해남 A 신호 및 추천 비중 섹션만 새로 계산"):
@@ -5155,7 +5187,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.subheader("🏦 3계좌 절세 최적화 리밸런싱")
-    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=삼성전자→SK하이닉스 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
+    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=TIME/KoAct 코스피액티브 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
     if st.button("🚀 리밸런싱 목표 계산하기", type="primary"):
         with st.spinner("계산 중..."):
             final_df = optimize_allocation(
