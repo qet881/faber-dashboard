@@ -855,6 +855,137 @@ BENCHMARK_ETF = {
     'note': '자산배분 펀드 (보조 벤치마크)'
 }
 
+REQUESTED_STATIC_PORTFOLIOS = [
+    {
+        "name": "요청 포트폴리오 1",
+        "description": "나스닥/코스피 액티브 + ACE 미국30년국채액티브",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.35},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.35},
+            {"name": "ACE 미국30년국채액티브", "ticker": "476760", "weight": 0.30},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 2",
+        "description": "액티브 성장/배당 + CD금리",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌우주테크&방산액티브", "ticker": "478150", "weight": 0.20},
+            {"name": "TIME Korea플러스배당액티브", "ticker": "441800", "weight": 0.20},
+            {"name": "TIGER 미국배당다우존스", "ticker": "458730", "weight": 0.20},
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 3",
+        "description": "나스닥/코스피/미국30년 + TIGER CD금리",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.25},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.25},
+            {"name": "ACE 미국30년국채액티브", "ticker": "476760", "weight": 0.25},
+            {"name": "TIGER CD금리투자KIS(합성)", "ticker": "357870", "weight": 0.25},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 4",
+        "description": "나스닥/우주방산/코스피액티브/미국배당/CD 각 20%",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌우주테크&방산액티브", "ticker": "478150", "weight": 0.20},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.20},
+            {"name": "TIGER 미국배당다우존스", "ticker": "458730", "weight": 0.20},
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 5",
+        "description": "미국배당 슬롯을 TIME 미국배당다우존스액티브로 교체(상장 전 TIGER 보강)",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌우주테크&방산액티브", "ticker": "478150", "weight": 0.20},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.20},
+            {
+                "name": "TIME 미국배당다우존스액티브",
+                "ticker": "0036D0",
+                "fallback_ticker": "458730",
+                "fallback_name": "TIGER 미국배당다우존스",
+                "weight": 0.20,
+            },
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 7",
+        "description": "2번 + TIME 미국배당다우존스액티브(상장 전 TIGER 보강)",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌우주테크&방산액티브", "ticker": "478150", "weight": 0.20},
+            {"name": "TIME Korea플러스배당액티브", "ticker": "441800", "weight": 0.20},
+            {
+                "name": "TIME 미국배당다우존스액티브",
+                "ticker": "0036D0",
+                "fallback_ticker": "458730",
+                "fallback_name": "TIGER 미국배당다우존스",
+                "weight": 0.20,
+            },
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 8",
+        "description": "코스피액티브+Korea플러스배당/나스닥/TIME 미국배당/CD 각 20%",
+        "assets": [
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.20},
+            {"name": "TIME Korea플러스배당액티브", "ticker": "441800", "weight": 0.20},
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {
+                "name": "TIME 미국배당다우존스액티브",
+                "ticker": "0036D0",
+                "fallback_ticker": "458730",
+                "fallback_name": "TIGER 미국배당다우존스",
+                "weight": 0.20,
+            },
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 9",
+        "description": "5번에서 우주방산을 TIME 글로벌AI인공지능액티브로 교체",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌AI인공지능액티브", "ticker": "456600", "weight": 0.20},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.20},
+            {
+                "name": "TIME 미국배당다우존스액티브",
+                "ticker": "0036D0",
+                "fallback_ticker": "458730",
+                "fallback_name": "TIGER 미국배당다우존스",
+                "weight": 0.20,
+            },
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+    {
+        "name": "요청 포트폴리오 10",
+        "description": "5번에서 우주방산 10% + TIME 글로벌AI 10%",
+        "assets": [
+            {"name": "TIME 미국나스닥100액티브", "ticker": "426030", "weight": 0.20},
+            {"name": "TIME 글로벌우주테크&방산액티브", "ticker": "478150", "weight": 0.10},
+            {"name": "TIME 글로벌AI인공지능액티브", "ticker": "456600", "weight": 0.10},
+            {"name": "TIME 코스피액티브", "ticker": "385720", "weight": 0.20},
+            {
+                "name": "TIME 미국배당다우존스액티브",
+                "ticker": "0036D0",
+                "fallback_ticker": "458730",
+                "fallback_name": "TIGER 미국배당다우존스",
+                "weight": 0.20,
+            },
+            {"name": "KODEX CD금리액티브(합성)", "ticker": "459580", "weight": 0.20},
+        ],
+    },
+]
+REQUESTED_PORTFOLIO_COMMON_START = pd.Timestamp("2024-04-30")
+
 PREFERRED_ACCOUNT = {
     '코스피200': '일반', '미국나스닥100': 'ISA',
     HAENAM_SAMSUNG_NAME: '일반', HAENAM_HYNIX_NAME: '일반',
@@ -3150,6 +3281,333 @@ def calculate_positive_month_ratio(daily_nav_df):
     return float((monthly_ret > 0).mean())
 
 
+def _build_union_trading_dates(data_dict, start_date, end_date):
+    all_dates = set()
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    for df in (data_dict or {}).values():
+        if df is not None and not df.empty:
+            all_dates.update(df.index)
+    return sorted(d for d in all_dates if start_ts <= d <= end_ts)
+
+
+def _first_common_month_end_start(data_dict, end_date, price_col="Adj Close"):
+    if not data_dict or any(df is None or df.empty for df in data_dict.values()):
+        return None, None, []
+
+    common_listing_date = max(df.index.min() for df in data_dict.values())
+    trading_dates = _build_union_trading_dates(data_dict, common_listing_date, end_date)
+    if not trading_dates:
+        return None, common_listing_date, []
+
+    month_end_dates = _collect_month_end_dates(trading_dates)
+    for d in month_end_dates:
+        has_all_prices = all(
+            get_price_at_date(df, d, price_col=price_col) is not None
+            for df in data_dict.values()
+        )
+        if has_all_prices:
+            return d, common_listing_date, trading_dates
+    return None, common_listing_date, trading_dates
+
+
+def _fetch_requested_portfolio_asset_data(asset, start_date, end_date):
+    main_df = fetch_etf_data(asset["ticker"], start_date, end_date, is_momentum=False)
+    fallback_ticker = asset.get("fallback_ticker")
+    if not fallback_ticker:
+        return main_df
+
+    fallback_df = fetch_etf_data(fallback_ticker, start_date, end_date, is_momentum=False)
+    if main_df is None or main_df.empty:
+        return fallback_df
+    if fallback_df is None or fallback_df.empty:
+        return main_df
+    return _chain_link_series(fallback_df, main_df)
+
+
+def simulate_fixed_weight_monthly_rebalanced_portfolio(
+    portfolio_def, start_date, end_date, initial_capital, price_col="Adj Close", force_start_date=None
+):
+    """사용자 지정 ETF 바스켓을 공통 상장 이후 첫 월말부터 월말 리밸런싱."""
+    raw_data = {}
+    for asset in portfolio_def.get("assets", []):
+        df = _fetch_requested_portfolio_asset_data(asset, start_date, end_date)
+        if df is not None and not df.empty:
+            raw_data[asset["name"]] = df[df.index <= pd.Timestamp(end_date)].copy()
+
+    required_names = [asset["name"] for asset in portfolio_def.get("assets", [])]
+    if any(name not in raw_data or raw_data[name].empty for name in required_names):
+        return None, raw_data, {"status": "데이터 부족"}
+
+    actual_start, common_listing_date, trading_dates = _first_common_month_end_start(
+        raw_data, end_date, price_col=price_col
+    )
+    if actual_start is None:
+        return None, raw_data, {"status": "공통 월말 시작일 없음", "common_listing_date": common_listing_date}
+
+    if force_start_date is not None:
+        forced_start = pd.Timestamp(force_start_date)
+        eligible_dates = [
+            d for d in trading_dates
+            if d >= forced_start and all(
+                get_price_at_date(df, d, price_col=price_col) is not None
+                for df in raw_data.values()
+            )
+        ]
+        if not eligible_dates:
+            return None, raw_data, {
+                "status": "고정 시작일 이후 공통 가격 없음",
+                "common_listing_date": common_listing_date,
+            }
+        actual_start = eligible_dates[0]
+
+    trading_dates = [d for d in trading_dates if d >= actual_start]
+    if not trading_dates:
+        return None, raw_data, {"status": "거래일 부족", "common_listing_date": common_listing_date}
+
+    weights = {asset["name"]: float(asset["weight"]) for asset in portfolio_def.get("assets", [])}
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return None, raw_data, {"status": "비중 오류", "common_listing_date": common_listing_date}
+    weights = {name: weight / total_weight for name, weight in weights.items()}
+
+    holdings = {name: 0.0 for name in weights}
+    nav = float(initial_capital)
+    last_valid_nav = nav
+    rows = []
+
+    def _rebalance(date, portfolio_value):
+        for name, weight in weights.items():
+            px = get_price_at_date(raw_data.get(name), date, price_col=price_col)
+            holdings[name] = (portfolio_value * weight / px) if px and px > 0 else 0.0
+
+    _rebalance(actual_start, nav)
+    for i, date in enumerate(trading_dates):
+        pv_raw = 0.0
+        for name, units in holdings.items():
+            px = get_price_at_date(raw_data.get(name), date, price_col=price_col)
+            if px is None or px <= 0:
+                pv_raw = None
+                break
+            pv_raw += units * px
+        pv = _safe_nav_value(pv_raw, last_valid_nav)
+        if pv is None:
+            pv = last_valid_nav
+        nav = pv
+        last_valid_nav = nav
+        rows.append({"date": date, "nav": nav})
+
+        if _is_month_end_rebalance_day(trading_dates, i) and date != actual_start:
+            _rebalance(date, nav)
+
+    nav_df = pd.DataFrame(rows).set_index("date").sort_index()
+    nav_df["running_max"] = nav_df["nav"].expanding().max()
+    nav_df["drawdown"] = (nav_df["nav"] - nav_df["running_max"]) / nav_df["running_max"]
+
+    meta = {
+        "status": "OK",
+        "common_listing_date": common_listing_date,
+        "actual_start": actual_start,
+        "actual_end": nav_df.index.max(),
+        "trading_days": int(len(nav_df)),
+        "month_count": int(len(nav_df["nav"].groupby(nav_df.index.to_period("M")).last()) - 1),
+    }
+    return nav_df, raw_data, meta
+
+
+def calculate_extended_nav_metrics(nav_df):
+    if nav_df is None or nav_df.empty:
+        return None
+    period_initial = float(nav_df["nav"].iloc[0])
+    current_value, total_return, mdd, cagr = calculate_performance_metrics(nav_df, period_initial)
+    monthly_mdd = calculate_monthly_mdd(nav_df)
+    volatility = calculate_annualized_volatility(nav_df)
+    sharpe = calculate_sharpe_ratio(nav_df)
+    sortino = calculate_sortino_ratio(nav_df)
+    cagr_mdd = (cagr / abs(mdd)) if (cagr is not None and cagr > 0 and mdd is not None and mdd < 0) else None
+    return {
+        "current_value": current_value,
+        "total_return": total_return,
+        "cagr": cagr,
+        "mdd": mdd,
+        "monthly_mdd": monthly_mdd,
+        "volatility": volatility,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "cagr_mdd": cagr_mdd,
+        "ulcer": calculate_ulcer_index(nav_df),
+        "martin": calculate_martin_ratio(nav_df, period_initial),
+        "pos_month": calculate_positive_month_ratio(nav_df),
+    }
+
+
+def render_requested_static_portfolio_backtests(
+    end_date, initial_capital, price_col="Adj Close", comparison_nav=None, comparison_label="해남 A",
+    collapsed=False,
+):
+    section = (
+        st.expander("📎 접어둔 연구/후보 포트폴리오 백테스트", expanded=False)
+        if collapsed else st.container()
+    )
+    with section:
+        if not collapsed:
+            st.markdown("---")
+        common_start = REQUESTED_PORTFOLIO_COMMON_START
+        st.subheader("📌 요청 포트폴리오 동일기간 월말 리밸런싱")
+        st.caption(
+            f"모든 포트폴리오는 {common_start.strftime('%Y-%m-%d')} 월말 거래일 종가에 투자하고, "
+            "이후 월말 거래일 종가 기준으로 목표 비중 리밸런싱합니다. "
+            "TIME 미국배당다우존스액티브는 상장 전 구간을 TIGER 미국배당다우존스로 보강해 같은 시작일로 비교합니다. "
+            "실전 본체가 아니라 비교용 연구/후보 자료입니다."
+        )
+
+        data_start = pd.Timestamp("2000-01-01")
+        summary_rows = []
+        detail_rows = []
+        chart_navs = {}
+
+        for portfolio in REQUESTED_STATIC_PORTFOLIOS:
+            nav_df, raw_data, meta = simulate_fixed_weight_monthly_rebalanced_portfolio(
+                portfolio, data_start, end_date, initial_capital,
+                price_col=price_col, force_start_date=common_start
+            )
+            if nav_df is None or meta.get("status") != "OK":
+                summary_rows.append({
+                    "포트폴리오": portfolio["name"],
+                    "구성": portfolio["description"],
+                    "백테스트 기간": "-",
+                    "CAGR": "-",
+                    "누적수익률": "-",
+                    "MDD(일별)": "-",
+                    "MDD(월말)": "-",
+                    "변동성": "-",
+                    "Sharpe": "-",
+                    "Sortino": "-",
+                    "양(+)월": "-",
+                    f"{comparison_label} CAGR": "-",
+                    f"{comparison_label} MDD": "-",
+                })
+                continue
+
+            metrics = calculate_extended_nav_metrics(nav_df)
+            comp_metrics = (
+                calculate_period_nav_metrics(comparison_nav, meta["actual_start"], meta["actual_end"])
+                if comparison_nav is not None and not comparison_nav.empty else None
+            )
+            chart_navs[portfolio["name"]] = nav_df
+            period = f"{meta['actual_start'].strftime('%Y-%m-%d')} ~ {meta['actual_end'].strftime('%Y-%m-%d')}"
+            summary_rows.append({
+                "포트폴리오": portfolio["name"],
+                "구성": portfolio["description"],
+                "백테스트 기간": period,
+                "개월": meta["month_count"],
+                "CAGR": f"{metrics['cagr']:.2%}" if metrics["cagr"] is not None else "-",
+                "누적수익률": f"{metrics['total_return']:.2%}" if metrics["total_return"] is not None else "-",
+                "MDD(일별)": f"{metrics['mdd']:.2%}" if metrics["mdd"] is not None else "-",
+                "MDD(월말)": f"{metrics['monthly_mdd']:.2%}" if metrics["monthly_mdd"] is not None else "-",
+                "변동성": f"{metrics['volatility']:.2%}" if metrics["volatility"] is not None else "-",
+                "Sharpe": f"{metrics['sharpe']:.2f}" if metrics["sharpe"] is not None else "-",
+                "Sortino": f"{metrics['sortino']:.2f}" if metrics["sortino"] is not None else "-",
+                "CAGR/MDD": f"{metrics['cagr_mdd']:.2f}" if metrics["cagr_mdd"] is not None else "-",
+                "양(+)월": f"{metrics['pos_month']:.1%}" if metrics["pos_month"] is not None else "-",
+                f"{comparison_label} 기간": (
+                    f"{comp_metrics['start'].strftime('%Y-%m-%d')} ~ {comp_metrics['end'].strftime('%Y-%m-%d')}"
+                    if comp_metrics is not None else "-"
+                ),
+                f"{comparison_label} CAGR": (
+                    f"{comp_metrics['cagr']:.2%}" if comp_metrics is not None else "-"
+                ),
+                f"{comparison_label} 누적수익률": (
+                    f"{comp_metrics['total_return']:.2%}" if comp_metrics is not None else "-"
+                ),
+                f"{comparison_label} MDD": (
+                    f"{comp_metrics['mdd']:.2%}" if comp_metrics is not None else "-"
+                ),
+            })
+
+            for asset in portfolio["assets"]:
+                df = raw_data.get(asset["name"])
+                ticker_label = asset["ticker"]
+                if asset.get("fallback_ticker"):
+                    ticker_label = f"{asset['ticker']} (상장 전 {asset['fallback_ticker']})"
+                detail_rows.append({
+                    "포트폴리오": portfolio["name"],
+                    "ETF": asset["name"],
+                    "티커": ticker_label,
+                    "비중": f"{asset['weight']:.0%}",
+                    "데이터 시작": df.index.min().strftime("%Y-%m-%d") if df is not None and not df.empty else "-",
+                })
+
+        if comparison_nav is not None and not comparison_nav.empty:
+            strategy_rows = [
+                ("요청 포트폴리오 6", f"{comparison_label} 전략", common_start),
+            ]
+            for row_name, description, start_ts in strategy_rows:
+                strategy_nav = slice_nav_period(comparison_nav, start_ts, end_date)
+                if strategy_nav is None or strategy_nav.empty:
+                    continue
+                metrics = calculate_extended_nav_metrics(strategy_nav)
+                actual_start = strategy_nav.index.min()
+                actual_end = strategy_nav.index.max()
+                month_count = int(len(strategy_nav["nav"].groupby(strategy_nav.index.to_period("M")).last()) - 1)
+                period = f"{actual_start.strftime('%Y-%m-%d')} ~ {actual_end.strftime('%Y-%m-%d')}"
+                chart_navs[row_name] = strategy_nav
+                summary_rows.append({
+                    "포트폴리오": row_name,
+                    "구성": description,
+                    "백테스트 기간": period,
+                    "개월": month_count,
+                    "CAGR": f"{metrics['cagr']:.2%}" if metrics["cagr"] is not None else "-",
+                    "누적수익률": f"{metrics['total_return']:.2%}" if metrics["total_return"] is not None else "-",
+                    "MDD(일별)": f"{metrics['mdd']:.2%}" if metrics["mdd"] is not None else "-",
+                    "MDD(월말)": f"{metrics['monthly_mdd']:.2%}" if metrics["monthly_mdd"] is not None else "-",
+                    "변동성": f"{metrics['volatility']:.2%}" if metrics["volatility"] is not None else "-",
+                    "Sharpe": f"{metrics['sharpe']:.2f}" if metrics["sharpe"] is not None else "-",
+                    "Sortino": f"{metrics['sortino']:.2f}" if metrics["sortino"] is not None else "-",
+                    "CAGR/MDD": f"{metrics['cagr_mdd']:.2f}" if metrics["cagr_mdd"] is not None else "-",
+                    "양(+)월": f"{metrics['pos_month']:.1%}" if metrics["pos_month"] is not None else "-",
+                    f"{comparison_label} 기간": period,
+                    f"{comparison_label} CAGR": f"{metrics['cagr']:.2%}" if metrics["cagr"] is not None else "-",
+                    f"{comparison_label} 누적수익률": (
+                        f"{metrics['total_return']:.2%}" if metrics["total_return"] is not None else "-"
+                    ),
+                    f"{comparison_label} MDD": f"{metrics['mdd']:.2%}" if metrics["mdd"] is not None else "-",
+                })
+
+        if summary_rows:
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        if detail_rows:
+            if collapsed:
+                st.markdown("**구성 ETF 및 데이터 시작일**")
+                st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+            else:
+                with st.expander("구성 ETF 및 데이터 시작일", expanded=False):
+                    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+
+        if chart_navs:
+            fig = make_subplots(rows=2, cols=1, subplot_titles=("누적수익률 (%)", "Drawdown (%)"),
+                                vertical_spacing=0.1, row_heights=[0.6, 0.4], shared_xaxes=True)
+            colors = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#ff7f0e", "#17becf"]
+            for idx, (name, nav_df) in enumerate(chart_navs.items()):
+                ret_pct = (nav_df["nav"] / nav_df["nav"].iloc[0] - 1.0) * 100.0
+                dd_pct = nav_df["drawdown"] * 100.0
+                fig.add_trace(go.Scatter(
+                    x=nav_df.index, y=ret_pct, mode="lines", name=name,
+                    line=dict(color=colors[idx % len(colors)], width=2),
+                    hovertemplate="%{x|%Y-%m-%d}<br>수익률: %{y:.2f}%<extra></extra>",
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(
+                    x=nav_df.index, y=dd_pct, mode="lines", name=f"{name} DD",
+                    line=dict(color=colors[idx % len(colors)], width=1.4, dash="dot"),
+                    hovertemplate="%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>",
+                    showlegend=False,
+                ), row=2, col=1)
+            fig.update_layout(height=620, hovermode="x unified", legend=dict(orientation="h", y=1.08))
+            fig.update_yaxes(title_text="수익률 (%)", row=1, col=1)
+            fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+            st.plotly_chart(fig, use_container_width=True)
+
+
 def calculate_rolling_outperformance_rate(nav_a, nav_b, window_months=36):
     """A가 B를 이긴 롤링 구간 비율. (월말 수익률 기준)"""
     if nav_a is None or nav_b is None or nav_a.empty or nav_b.empty:
@@ -3647,6 +4105,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         else:
             st.text(f"  {BENCHMARK_ETF['name']} ({BENCHMARK_ETF['ticker']}): ❌ 데이터 없음 (펀드코드가 FDR 미지원일 수 있음)")
 
+    IC = 10_000_000
+
     st.markdown("---")
     st.subheader(f"📊 해남 A 중심 전략 백테스트 (요청 시작: {bt_start_date.strftime('%Y-%m')})")
     
@@ -3659,7 +4119,6 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         with st.expander("Backtest input fingerprint", expanded=False):
             st.dataframe(fingerprint_df, use_container_width=True, hide_index=True)
 
-    IC = 10_000_000
     nav_df = simulate_faber_strategy(bt_start_date, current_date, IC, all_data,
         mode='A', buffer_df=None, price_col=price_col)
     if nav_df is None:
@@ -5228,6 +5687,13 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         ex.to_excel(writer, sheet_name="Haenam_A_리밸런싱", index=False)
     st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"HaenamA_리밸런싱_{current_dt.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+    st.markdown("---")
+    render_requested_static_portfolio_backtests(
+        requested_backtest_end, IC, price_col=price_col,
+        comparison_nav=primary_nav_df, comparison_label=primary_label,
+        collapsed=True,
+    )
 
 
 # ==============================
