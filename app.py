@@ -761,7 +761,8 @@ HAENAM_KR_KOACT_NAME = 'KoAct 코스피액티브'
 TIME_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2021-05-25')
 KOACT_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2026-05-07')  # 효력발생일 근사(상장 직후, 백테스트 영향 미미)
 # 나스닥100 슬롯 실제 집행 상품 전환일 ('이번 달 성과 참고' 표시 전용 — 공식 손익과는 무관).
-# 액티브(TIME/KoAct) 괴리율이 높아 현재는 패시브(미국나스닥100, 133690)로 집행 중.
+# 2026-06-02 TIME/KoAct 나스닥100액티브 50:50로 전환 완료(이전: 패시브 미국나스닥100, 133690).
+#   - 전환 게이트: TIME·KoAct 괴리율이 모두 패시브(133690) 기준선 대비 0.3% 이하인 날 집행(2026-06-02 충족).
 #
 # === 전환 방법 (다른 Claude Code도 따라할 수 있도록) ===
 # 사용자가 액티브로 갈아탄 날짜를 주면 아래 None을 그 날짜로 바꾼다. 예: pd.Timestamp('2026-06-30').
@@ -773,7 +774,7 @@ KOACT_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2026-05-07')  # 효력발생일 
 #     체결가/체결일은 .codex-private 저널 기록용이며 이 계산에는 들어가지 않는다.
 #   - 공식 손익(계좌 총액 − 기준 − 현금흐름)과는 무관. 이 상수는 참고 표시만 바꾼다.
 # 상세 운용 메모: .codex-private/investment_memory.md
-HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = None
+HAENAM_NASDAQ_ACTIVE_SWITCH_DATE = pd.Timestamp('2026-06-02')
 # 한국주식 슬롯 코스피 액티브 전환일 ('이번 달 성과 참고' 표시 전용 — 공식 손익과는 무관).
 # 2026-06-01 TIME/KoAct 코스피액티브 50:50로 전환 완료(이전: 삼성전자/SK하이닉스 50:50).
 #   - 나스닥 패시브→액티브 전환일과 같은 날 한 번에 옮기는 것을 기준으로 한다.
@@ -5363,27 +5364,35 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 if passive_nasdaq_w > 0:
                     rebal_weights[NASDAQ100_ASSET_NAME] = rebal_weights.get(NASDAQ100_ASSET_NAME, 0.0) + passive_nasdaq_w
 
-            # ── [전환월 임시 특례] 한국 슬롯 삼전/하닉 → 코스피액티브 (2026-06-01 집행) ──
-            # 이번 참고 기간(rebal_date=전월 말 5/29)에 전환일(6/1)이 끼어 있어, 삼전/하닉은 매도가에
-            # 동결(청산익 고정)하고 코스피액티브 2종은 매수가부터 시장 추적으로 나눠 표시한다.
+            # ── [전환월 임시 특례] 슬롯 그릇 교체: 전월 말 rebal → 이번 달 초 전환 ──
+            # 이번 참고 기간(rebal_date=전월 말 5/29)에 두 전환일(코스피 6/1·나스닥 6/2)이 끼어 있어,
+            # 구 보유분(삼전/하닉·패시브 나스닥)은 매도가에 동결(청산익 고정)하고,
+            # 신 보유분(코스피액티브·나스닥액티브)은 매수가부터 시장 추적으로 나눠 표시한다.
             # 체결가는 이 '참고' 표시 전용이며 공식 손익(계좌총액 기준)과 무관하다.
-            # ※ 6/30 리밸 후에는 rebal_date >= 전환일이라 이 블록을 안 타고 코스피액티브만 자동 표시됨 → 그때 이 블록 삭제.
-            kr_freeze_px = {}        # 삼전/하닉 매도가 동결 (px_e 대체)
-            kr_active_entry_px = {}  # 코스피액티브 매수가 시작 (px_s 대체)
+            # ※ 6/30 리밸 후에는 rebal_date >= 각 전환일이라 이 블록을 안 타고 신 보유분만 자동 표시됨 → 그때 이 블록 전체 삭제.
+            freeze_px = {}        # 구 보유분 매도가 동결 (px_e 대체)
+            active_entry_px = {}  # 신 보유분 매수가 시작 (px_s 대체)
+            # 한국 슬롯: 삼전/하닉 → 코스피액티브 (2026-06-01 집행)
             if (HAENAM_KR_ACTIVE_SWITCH_DATE is not None
                     and pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_KR_ACTIVE_SWITCH_DATE) <= pd.Timestamp(current_date)):
-                kr_freeze_px = {
-                    HAENAM_SAMSUNG_NAME: 349500.0,   # 2026-06-01 매도 체결가 (98주)
-                    HAENAM_HYNIX_NAME: 2364000.0,    # 2026-06-01 매도 체결가 (14주)
-                }
-                kr_active_entry_px = {
-                    HAENAM_KR_TIME_NAME: 34160.0,    # 2026-06-01 매수가 (981주)
-                    HAENAM_KR_KOACT_NAME: 11260.0,   # 2026-06-01 매수가 (2,973주)
-                }
+                freeze_px[HAENAM_SAMSUNG_NAME] = 349500.0    # 2026-06-01 매도 체결가 (98주)
+                freeze_px[HAENAM_HYNIX_NAME] = 2364000.0     # 2026-06-01 매도 체결가 (14주)
+                active_entry_px[HAENAM_KR_TIME_NAME] = 34160.0    # 2026-06-01 매수가 (981주)
+                active_entry_px[HAENAM_KR_KOACT_NAME] = 11260.0   # 2026-06-01 매수가 (2,973주)
                 kr_slot_w = rebal_weights.get(HAENAM_SAMSUNG_NAME, 0.0) + rebal_weights.get(HAENAM_HYNIX_NAME, 0.0)
                 if kr_slot_w > 0:
                     rebal_weights[HAENAM_KR_TIME_NAME] = kr_slot_w / 2.0
                     rebal_weights[HAENAM_KR_KOACT_NAME] = kr_slot_w / 2.0
+            # 나스닥 슬롯: 패시브(미국나스닥100) → 액티브(TIME/KoAct) (2026-06-02 집행)
+            if (HAENAM_NASDAQ_ACTIVE_SWITCH_DATE is not None
+                    and pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_NASDAQ_ACTIVE_SWITCH_DATE) <= pd.Timestamp(current_date)):
+                freeze_px[NASDAQ100_ASSET_NAME] = 204235.0   # 2026-06-02 매도 체결가 (309주, 63,108,615/309)
+                active_entry_px[HAENAM_TIME_NAME] = 58423.0   # 2026-06-02 매수가 (541주)
+                active_entry_px[HAENAM_KOACT_NAME] = 24700.0  # 2026-06-02 매수가 (1,278주)
+                nasdaq_slot_w = rebal_weights.get(NASDAQ100_ASSET_NAME, 0.0)
+                if nasdaq_slot_w > 0:
+                    rebal_weights[HAENAM_TIME_NAME] = nasdaq_slot_w / 2.0
+                    rebal_weights[HAENAM_KOACT_NAME] = nasdaq_slot_w / 2.0
 
             monthly_rows = []
             total_pnl = 0.0
@@ -5399,17 +5408,19 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 else:
                     px_s = get_price_at_date(haenam_price_data.get(an), rebal_date, price_col=price_col)
                     px_e = get_price_at_date(haenam_price_data.get(an), current_date, price_col=price_col)
-                    if an in kr_active_entry_px:
-                        px_s = kr_active_entry_px[an]   # 코스피액티브: 매수가부터 시장 추적
-                    if an in kr_freeze_px:
-                        px_e = kr_freeze_px[an]          # 삼전/하닉: 매도가에 동결(청산익 고정)
+                    if an in active_entry_px:
+                        px_s = active_entry_px[an]   # 신 보유분(액티브): 매수가부터 시장 추적
+                    if an in freeze_px:
+                        px_e = freeze_px[an]          # 구 보유분: 매도가에 동결(청산익 고정)
                 if not px_s or px_s <= 0 or not px_e or px_e <= 0:
                     continue
                 ret = (px_e / px_s) - 1.0
                 pnl = alloc_won * ret
                 total_pnl += pnl
                 monthly_rows.append({
-                    "자산": f"{an}(매도청산)" if an in kr_freeze_px else an,
+                    "자산": f"{an}(매도청산)" if an in freeze_px else an,
+                    "_raw": an,
+                    "_frozen": an in freeze_px,
                     "비중": f"{w*100:.0f}%",
                     "배분금액": f"{alloc_won:,.0f}원",
                     "기준가(리밸)": f"{px_s:,.2f}",
@@ -5420,8 +5431,24 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
             if monthly_rows:
                 st.markdown("##### 참고: 자산별 가격변동 추정")
-                cols_m = st.columns(len(monthly_rows) + 1)
-                for i, row in enumerate(monthly_rows):
+                # 표시 순서: 한국주식 → 미국주식 → 미국채권 → 한국채권 → 금 → 기타 → 현금.
+                # 청산분(매도청산)은 현 보유분과 분리해 아랫줄에 따로 표시한다.
+                _kr_stock = {HAENAM_KR_TIME_NAME, HAENAM_KR_KOACT_NAME, HAENAM_SAMSUNG_NAME, HAENAM_HYNIX_NAME, KR_STOCK_MIX_ASSET}
+                _us_stock = {HAENAM_TIME_NAME, HAENAM_KOACT_NAME, NASDAQ100_ASSET_NAME}
+                def _cat_rank(raw):
+                    if raw in _kr_stock: return 0
+                    if raw in _us_stock: return 1
+                    if raw == '미국채30년': return 2
+                    if raw == '한국채30년': return 3
+                    if raw == '금현물': return 4
+                    if raw == CASH_NAME: return 6
+                    return 5
+                current_rows = sorted([r for r in monthly_rows if not r["_frozen"]], key=lambda r: _cat_rank(r["_raw"]))
+                liquidated_rows = sorted([r for r in monthly_rows if r["_frozen"]], key=lambda r: _cat_rank(r["_raw"]))
+
+                # 현 보유분 + 참고 합계 (윗줄)
+                cols_m = st.columns(len(current_rows) + 1)
+                for i, row in enumerate(current_rows):
                     cols_m[i].metric(
                         label=row["자산"],
                         value=f"{row['수익률']:+.2f}%",
@@ -5432,6 +5459,18 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                     value=f"{total_pnl:+,.0f}원",
                     delta=f"{total_pnl/nav_at_rebal*100:+.2f}%" if nav_at_rebal > 0 else "N/A",
                 )
+
+                # 이번 달 중 매도청산 (아랫줄, 있을 때만): 수익률이 매도가에 고정된 자산
+                if liquidated_rows:
+                    st.caption("↓ 이번 달 중 매도청산 (수익률은 매도가에 고정 — 다음 달 리밸 후 자동으로 사라짐)")
+                    cols_liq = st.columns(max(len(current_rows) + 1, len(liquidated_rows)))
+                    for i, row in enumerate(liquidated_rows):
+                        cols_liq[i].metric(
+                            label=row["자산"],
+                            value=f"{row['수익률']:+.2f}%",
+                            delta=f"{row['손익(원)']:+,.0f}원",
+                        )
+
                 with st.expander("📋 이번 달 자산별 상세"):
                     detail_df = pd.DataFrame([{
                         "자산": r["자산"],
@@ -5441,7 +5480,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                         "현재가": r["현재가"],
                         "수익률": f"{r['수익률']:+.2f}%",
                         "손익(원)": f"{r['손익(원)']:+,.0f}원",
-                    } for r in monthly_rows])
+                    } for r in (current_rows + liquidated_rows)])
                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
                 st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 당시 NAV {nav_at_rebal:,.0f}원 기준({nav_source}). 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음.")
     except Exception as e:
