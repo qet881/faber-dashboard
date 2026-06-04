@@ -1,0 +1,62 @@
+name: Active ETF Holdings Alert
+
+on:
+  schedule:
+    # UTC 23:10/23:40 Sun-Thu = KST 08:10/08:40 Mon-Fri.
+    # UTC 00:10 Mon-Fri = KST 09:10 Mon-Fri.
+    # The script also applies the final KST weekday/time gate.
+    - cron: "10,40 23 * * 0-4"
+    - cron: "10 0 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: active-etf-holdings-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run alert
+        run: python active_etf_holdings_alert.py --state-file active_etf_holdings_alert_state.json
+
+      - name: Commit state file when changed
+        run: |
+          if [ -z "$(git status --porcelain -- active_etf_holdings_alert_state.json)" ]; then
+            echo "No state change to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add active_etf_holdings_alert_state.json
+          git commit \
+            -m "Persist active ETF alert state for duplicate-safe reports" \
+            -m "Constraint: State is updated by scheduled GitHub Actions after official issuer-source runs.
+Confidence: high
+Scope-risk: narrow
+Directive: Keep this commit limited to active_etf_holdings_alert_state.json.
+Tested: Workflow writes only changed state file.
+Not-tested: Live Telegram send depends on repository secrets."
+          git push
