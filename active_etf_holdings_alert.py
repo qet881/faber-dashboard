@@ -23,6 +23,8 @@ import requests
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_STATE_FILE = "active_etf_holdings_alert_state.json"
 FOOTER = "공식 운용사 PDF/엑셀 공시 기준 자동 요약이며, 투자 권유가 아닙니다."
+DEFAULT_OPENROUTER_MODEL = "google/gemma-3-12b-it:free"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 @dataclass(frozen=True)
@@ -472,14 +474,91 @@ def fmt_holding(holding: Holding) -> str:
     return f"{holding.rank}위 {holding.name}{code} {holding.weight:.2f}%"
 
 
+def changed_holdings_for_comment(diff: DiffResult) -> list[Holding]:
+    return diff.added + diff.removed + diff.top10_entries + diff.top10_exits + [new for _, new in diff.rank_changes]
+
+
+def fallback_one_liner(diff: DiffResult) -> str:
+    themes = infer_themes(changed_holdings_for_comment(diff))
+    if themes:
+        return "변화 종목 기준으로 " + ", ".join(themes) + " 쪽 노출 조정이 보입니다."
+    return "특정 테마로 단정하기 어려운 보유종목 재배치입니다."
+
+
+def diff_prompt_payload(snapshot: Snapshot, diff: DiffResult) -> dict[str, Any]:
+    return {
+        "etf": {"ticker": snapshot.ticker, "name": snapshot.name, "date": snapshot.disclosure_date},
+        "added": [fmt_holding(h) for h in diff.added[:8]],
+        "removed": [fmt_holding(h) for h in diff.removed[:8]],
+        "top10_entries": [fmt_holding(h) for h in diff.top10_entries[:8]],
+        "top10_exits": [fmt_holding(h) for h in diff.top10_exits[:8]],
+        "rank_changes": [f"{new.name} {old.rank}->{new.rank}위" for old, new in diff.rank_changes[:8]],
+    }
+
+
+def sanitize_one_liner(text: str) -> str:
+    cleaned = " ".join(str(text or "").strip().split())
+    cleaned = re.sub(r"^(한줄평|해석)\s*[:：]\s*", "", cleaned)
+    if len(cleaned) > 90:
+        cleaned = cleaned[:87].rstrip() + "..."
+    return cleaned
+
+
+def generate_gemma_one_liner(snapshot: Snapshot, diff: DiffResult) -> str | None:
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+    model = os.getenv("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL
+    try:
+        response = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/qet881/faber-dashboard",
+                "X-OpenRouter-Title": "faber-dashboard active ETF report",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "너는 액티브 ETF 보유종목 변화 리포트를 쓰는 한국어 애널리스트다. "
+                            "제공된 변화만 근거로 ETF 매니저가 어디에 무게를 둔 것처럼 보이는지 "
+                            "한 문장으로만 말한다. 투자 권유, 확정적 단정, 상투적인 표현은 피한다."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "아래 ETF 보유종목 변화만 보고 45자 안팎의 한국어 한줄평 1개만 써줘. "
+                            "접두어 없이 문장만 출력해.\n"
+                            + json.dumps(diff_prompt_payload(snapshot, diff), ensure_ascii=False)
+                        ),
+                    },
+                ],
+                "temperature": 0.4,
+                "max_tokens": 90,
+            },
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        return sanitize_one_liner(content) or None
+    except Exception:
+        return None
+
+
+def one_liner(snapshot: Snapshot, diff: DiffResult) -> str:
+    return generate_gemma_one_liner(snapshot, diff) or fallback_one_liner(diff)
+
+
 def render_etf_section(snapshot: Snapshot, diff: DiffResult) -> str:
     lines = [f"[{snapshot.ticker}] {snapshot.name}", f"기준일: {snapshot.disclosure_date or '확인 불가'}"]
-    changed_holdings = diff.added + diff.removed + diff.top10_entries + diff.top10_exits + [new for _, new in diff.rank_changes]
-    themes = infer_themes(changed_holdings)
-    if themes:
-        lines.append("해석: 변화 종목 기준으로 " + ", ".join(themes) + " 쪽 노출 조정이 보입니다.")
-    else:
-        lines.append("해석: 특정 테마로 단정하기 어려운 보유종목 재배치입니다.")
+    lines.append("한줄평: " + one_liner(snapshot, diff))
 
     if diff.added:
         lines.append("신규 편입: " + "; ".join(fmt_holding(h) for h in diff.added[:5]))

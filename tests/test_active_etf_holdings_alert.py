@@ -160,3 +160,47 @@ def test_message_key_ignores_dynamic_report_time():
     key_20 = alert.build_message_key(report_20, [result], datetime(2026, 6, 4, 20, tzinfo=alert.KST))
 
     assert key_18 == key_20
+
+
+def test_gemma_one_liner_uses_openrouter_when_available(monkeypatch):
+    config = alert.ETFS[0]
+    snapshot = make_snapshot(config.ticker)
+    diff = alert.diff_snapshots(
+        make_snapshot(config.ticker),
+        make_snapshot(config.ticker, holdings=[{"code": "NVDA", "name": "NVIDIA Corp", "weight": 40}]),
+    )
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "GPU 중심에서 AI 인프라 쪽으로 무게가 더 실린 변화"}}]}
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(alert.requests, "post", fake_post)
+
+    comment = alert.one_liner(snapshot, diff)
+
+    assert comment == "GPU 중심에서 AI 인프라 쪽으로 무게가 더 실린 변화"
+    assert calls[0][0] == alert.OPENROUTER_URL
+    assert calls[0][1]["json"]["model"] == alert.DEFAULT_OPENROUTER_MODEL
+
+
+def test_gemma_one_liner_falls_back_on_error(monkeypatch):
+    config = alert.ETFS[0]
+    previous = make_snapshot(config.ticker)
+    latest = make_snapshot(config.ticker, holdings=[{"code": "NVDA", "name": "NVIDIA Corp", "weight": 40}])
+    diff = alert.diff_snapshots(previous, latest)
+
+    def fake_post(url, **kwargs):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(alert.requests, "post", fake_post)
+
+    assert "AI/반도체" in alert.one_liner(latest, diff)
