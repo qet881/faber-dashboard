@@ -41,7 +41,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run alert
-        run: python active_etf_holdings_alert.py --state-file active_etf_holdings_alert_state.json
+        run: python active_etf_holdings_alert.py --state-file active_etf_holdings_alert_state.json --ignore-time-gate
 
       - name: Commit state file when changed
         run: |

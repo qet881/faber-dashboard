@@ -1,7 +1,16 @@
 import json
 from datetime import datetime
+from pathlib import Path
 
 import active_etf_holdings_alert as alert
+
+
+WORKFLOW_SOURCE = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "active-etf-holdings-alert.yml"
+WORKFLOW_RUN_COMMAND = (
+    "python active_etf_holdings_alert.py "
+    "--state-file active_etf_holdings_alert_state.json "
+    "--ignore-time-gate"
+)
 
 
 def make_snapshot(ticker="0015B0", holdings=None, date="2026-06-03"):
@@ -204,3 +213,9 @@ def test_gemma_one_liner_falls_back_on_error(monkeypatch):
     monkeypatch.setattr(alert.requests, "post", fake_post)
 
     assert "AI/반도체" in alert.one_liner(latest, diff)
+
+
+def test_github_workflow_bypasses_exact_minute_time_gate():
+    source = WORKFLOW_SOURCE.read_text(encoding="utf-8")
+
+    assert WORKFLOW_RUN_COMMAND in source
