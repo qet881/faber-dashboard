@@ -678,6 +678,18 @@ DEFAULT_GEN_GOLD_BAL  = 533
 DEFAULT_ISA_A_BAL     = 79_099_381
 DEFAULT_ISA_B_BAL     = 82_647_962
 DEFAULT_BALANCE_VERSION = "2026-05-29-final2"
+BALANCE_DEFAULTS = [
+    ("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL),
+    ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
+    ("bal_isa_a", DEFAULT_ISA_A_BAL),
+    ("bal_isa_b", DEFAULT_ISA_B_BAL),
+]
+BALANCE_QUERY_KEYS = {
+    "bal_gen_kospi": "gen_k",
+    "bal_gen_gold": "gen_g",
+    "bal_isa_a": "isaa",
+    "bal_isa_b": "isab",
+}
 
 # 미확정 예정 입금 — NAV 계산에 반영되지 않음. 확정 시 CONFIRMED 으로 이동.
 PERSONAL_CASH_FLOWS_PENDING: dict[str, Any] = {
@@ -999,6 +1011,32 @@ GENERAL_PRIORITY = ['금현물', HAENAM_SAMSUNG_NAME, HAENAM_HYNIX_NAME, HAENAM_
 ISA_PRIORITY = ['미국채30년', '한국채30년', HAENAM_TIME_NAME, HAENAM_KOACT_NAME, '미국나스닥100']
 ACCOUNT_COLUMNS = ["금계좌", "일반계좌", "ISA_A", "ISA_B"]
 MIN_VALID_MONTHS = 12
+
+BUY_HOLD_ACCOUNT_COLUMNS = ["일반계좌", "ISA_A", "ISA_B"]
+BUY_HOLD_ACCOUNT_DISPLAY = {
+    "일반계좌": "일반계좌",
+    "ISA_A": "ISA A",
+    "ISA_B": "ISA B",
+}
+BUY_HOLD_BASELINE_WEIGHTS = {
+    "코스피": 0.20,
+    "나스닥100": 0.20,
+    "미국채30년": 0.20,
+    "현금": 0.40,
+}
+BUY_HOLD_ASSET_BUCKETS = list(BUY_HOLD_BASELINE_WEIGHTS.keys())
+BUY_HOLD_INSTRUMENT_MAP = {
+    "코스피": f"{HAENAM_KR_TIME_NAME} / {HAENAM_KR_KOACT_NAME} (50:50)",
+    "나스닥100": f"{HAENAM_TIME_NAME} / {HAENAM_KOACT_NAME} (50:50)",
+    "미국채30년": "ACE 미국30년국채액티브 (476760)",
+    "현금": f"{CASH_NAME} ({CASH_TICKER})",
+}
+BUY_HOLD_ACCOUNT_PRIORITY = {
+    "코스피": ["일반계좌", "ISA_A", "ISA_B"],
+    "나스닥100": ["ISA_B", "ISA_A", "일반계좌"],
+    "미국채30년": ["ISA_A", "ISA_B", "일반계좌"],
+    "현금": ["일반계좌", "ISA_A", "ISA_B"],
+}
 
 
 # ==============================
@@ -4069,6 +4107,138 @@ def optimize_allocation(df_res, b_gen_kospi, b_gen_gold, b_isa_a, b_isa_b):
     return pd.concat([df_out, pd.DataFrame([sum_row])], ignore_index=True)
 
 
+def normalize_buy_hold_weights(raw_weights):
+    weights = {asset: max(0.0, float(raw_weights.get(asset, 0.0))) for asset in BUY_HOLD_ASSET_BUCKETS}
+    total = sum(weights.values())
+    if total <= 0:
+        return BUY_HOLD_BASELINE_WEIGHTS.copy(), 0.0
+    return {asset: weight / total for asset, weight in weights.items()}, total
+
+
+def calculate_buy_hold_allocation(account_balances, target_weights, baseline_weights=None):
+    """Calculate the isolated buy-and-hold sandbox allocation.
+
+    The baseline is an assumed current state, not a real holding ledger.
+    """
+    baseline_weights = baseline_weights or BUY_HOLD_BASELINE_WEIGHTS
+    balances = {
+        account: max(0.0, float(account_balances.get(account, 0.0)))
+        for account in BUY_HOLD_ACCOUNT_COLUMNS
+    }
+    total_assets = sum(balances.values())
+    normalized_targets, raw_weight_total = normalize_buy_hold_weights(target_weights)
+    baseline_normalized, _ = normalize_buy_hold_weights(baseline_weights)
+    rem = balances.copy()
+    allocation = {
+        asset: {account: 0.0 for account in BUY_HOLD_ACCOUNT_COLUMNS}
+        for asset in BUY_HOLD_ASSET_BUCKETS
+    }
+
+    def _allocate(asset, amount):
+        left = float(amount)
+        for account in BUY_HOLD_ACCOUNT_PRIORITY[asset]:
+            if left <= 0:
+                break
+            fill = min(left, rem[account])
+            allocation[asset][account] += fill
+            rem[account] -= fill
+            left -= fill
+        if left > 0.5:
+            overflow_account = BUY_HOLD_ACCOUNT_PRIORITY[asset][-1]
+            allocation[asset][overflow_account] += left
+            rem[overflow_account] -= left
+
+    for asset in BUY_HOLD_ASSET_BUCKETS:
+        if asset == "현금":
+            continue
+        _allocate(asset, total_assets * normalized_targets[asset])
+    _allocate("현금", total_assets * normalized_targets["현금"])
+
+    rows = []
+    for asset in BUY_HOLD_ASSET_BUCKETS:
+        target_amount = total_assets * normalized_targets[asset]
+        baseline_amount = total_assets * baseline_normalized.get(asset, 0.0)
+        row = {
+            "자산": asset,
+            "투자상품": BUY_HOLD_INSTRUMENT_MAP[asset],
+            "현재가정비중": baseline_normalized.get(asset, 0.0),
+            "목표비중": normalized_targets[asset],
+            "현재가정금액": baseline_amount,
+            "목표금액": target_amount,
+            "추가매수_매도": target_amount - baseline_amount,
+        }
+        for account in BUY_HOLD_ACCOUNT_COLUMNS:
+            row[account] = allocation[asset][account]
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    sum_row = {
+        "자산": "합계",
+        "투자상품": "",
+        "현재가정비중": sum(baseline_normalized.values()),
+        "목표비중": sum(normalized_targets.values()),
+        "현재가정금액": total_assets,
+        "목표금액": total_assets,
+        "추가매수_매도": float(df["추가매수_매도"].sum()) if not df.empty else 0.0,
+    }
+    for account in BUY_HOLD_ACCOUNT_COLUMNS:
+        sum_row[account] = float(df[account].sum()) if not df.empty else 0.0
+    df = pd.concat([df, pd.DataFrame([sum_row])], ignore_index=True)
+    money_cols = ["현재가정금액", "목표금액", "추가매수_매도"] + BUY_HOLD_ACCOUNT_COLUMNS
+    for col in money_cols:
+        df[col] = df[col].round(0)
+    return {
+        "total_assets": total_assets,
+        "raw_weight_total": raw_weight_total,
+        "weights": normalized_targets,
+        "table": df,
+    }
+
+
+def _set_default_balance_query_params():
+    _set_query_params(
+        gen_k=DEFAULT_GEN_KOSPI_BAL,
+        gen_g=DEFAULT_GEN_GOLD_BAL,
+        isaa=DEFAULT_ISA_A_BAL,
+        isab=DEFAULT_ISA_B_BAL,
+        bal_v=DEFAULT_BALANCE_VERSION,
+    )
+
+
+def _ensure_account_balance_state(account_keys=None, sync_query_params=True):
+    selected_keys = list(account_keys) if account_keys is not None else [key for key, _ in BALANCE_DEFAULTS]
+    default_by_key = dict(BALANCE_DEFAULTS)
+    selected_defaults = [(key, default_by_key[key]) for key in selected_keys]
+    qp = _get_query_params()
+    qp_balance_version = str(_qp_first(qp.get("bal_v")) or "")
+    if st.session_state.get("_balance_defaults_version") != DEFAULT_BALANCE_VERSION and qp_balance_version != DEFAULT_BALANCE_VERSION:
+        for key, default in selected_defaults:
+            st.session_state[key] = default
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
+        if sync_query_params:
+            _set_default_balance_query_params()
+    else:
+        for key, default in selected_defaults:
+            if key not in st.session_state:
+                qp_val = _get_qp_int(qp, BALANCE_QUERY_KEYS[key])
+                st.session_state[key] = qp_val if qp_val is not None else default
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
+
+    if sum(float(st.session_state.get(key, 0) or 0) for key, _ in selected_defaults) <= 0:
+        for key, default in selected_defaults:
+            st.session_state[key] = default
+        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
+        if sync_query_params:
+            _set_default_balance_query_params()
+
+
+def _get_account_balance_value(session_key, default):
+    if session_key in st.session_state:
+        return float(st.session_state.get(session_key) or 0)
+    qp_val = _get_qp_int(_get_query_params(), BALANCE_QUERY_KEYS[session_key])
+    return float(qp_val if qp_val is not None else default)
+
+
 # ==============================
 # 10. UI 모드들
 # ==============================
@@ -5213,42 +5383,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.caption("※ 월말 종가 기준(같은 날 체결) 가정. 금현물 Faber 신호는 0064K0 기준(실시간 실패 시 GC=F×환율 fallback).")
     st.markdown("---")
 
-    qp = _get_query_params()
-    balance_defaults = [
-        ("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL),
-        ("bal_gen_gold", DEFAULT_GEN_GOLD_BAL),
-        ("bal_isa_a", DEFAULT_ISA_A_BAL),
-        ("bal_isa_b", DEFAULT_ISA_B_BAL),
-    ]
-    qp_balance_version = str(_qp_first(qp.get("bal_v")) or "")
-    if st.session_state.get("_balance_defaults_version") != DEFAULT_BALANCE_VERSION and qp_balance_version != DEFAULT_BALANCE_VERSION:
-        for key, default in balance_defaults:
-            st.session_state[key] = default
-        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
-        _set_query_params(
-            gen_k=DEFAULT_GEN_KOSPI_BAL, gen_g=DEFAULT_GEN_GOLD_BAL,
-            isaa=DEFAULT_ISA_A_BAL, isab=DEFAULT_ISA_B_BAL,
-            bal_v=DEFAULT_BALANCE_VERSION,
-        )
-    else:
-        for key, default in balance_defaults:
-            qp_key = {"bal_gen_kospi":"gen_k","bal_gen_gold":"gen_g","bal_isa_a":"isaa","bal_isa_b":"isab"}[key]
-            if key not in st.session_state:
-                qp_val = _get_qp_int(qp, qp_key)
-                st.session_state[key] = qp_val if qp_val is not None else default
-        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
-
-    if sum(float(st.session_state.get(key, 0) or 0) for key, _ in balance_defaults) <= 0:
-        for key, default in balance_defaults:
-            st.session_state[key] = default
-        st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
-        _set_query_params(
-            gen_k=DEFAULT_GEN_KOSPI_BAL,
-            gen_g=DEFAULT_GEN_GOLD_BAL,
-            isaa=DEFAULT_ISA_A_BAL,
-            isab=DEFAULT_ISA_B_BAL,
-            bal_v=DEFAULT_BALANCE_VERSION,
-        )
+    _ensure_account_balance_state()
 
     st.sidebar.markdown("### 💰 계좌 잔고 입력")
     st.sidebar.warning(
@@ -5256,7 +5391,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         "외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
     )
     if st.sidebar.button("🔄 잔고 기본값으로 초기화"):
-        for k, v in balance_defaults:
+        for k, v in BALANCE_DEFAULTS:
             st.session_state[k] = v
         st.session_state["_balance_defaults_version"] = DEFAULT_BALANCE_VERSION
         _set_query_params(
@@ -5964,6 +6099,64 @@ def mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_ca
                 f"**\"잘 되면 얼마 버나\"가 아니라 \"안 되어도 안 죽는다\"가 이 전략의 본질입니다.**")
 
 
+def mode_buy_hold_sandbox(current_dt):
+    st.title("Buy & Hold 샌드박스")
+    st.caption(
+        "기존 전략을 바꾸지 않는 검토용 계산기입니다. "
+        "실전 화면의 일반계좌/ISA A/ISA B 잔고를 재사용하고, 해남 A/Faber 계산에는 영향을 주지 않습니다."
+    )
+    st.markdown("---")
+
+    account_balances = {
+        "일반계좌": _get_account_balance_value("bal_gen_kospi", DEFAULT_GEN_KOSPI_BAL),
+        "ISA_A": _get_account_balance_value("bal_isa_a", DEFAULT_ISA_A_BAL),
+        "ISA_B": _get_account_balance_value("bal_isa_b", DEFAULT_ISA_B_BAL),
+    }
+    total_assets = sum(account_balances.values())
+    st.markdown(f"**기준시각:** {current_dt.strftime('%Y년 %m월 %d일 %H:%M:%S')}")
+    balance_cols = st.columns(4)
+    balance_cols[0].metric("일반계좌", f"{account_balances['일반계좌']:,.0f}원")
+    balance_cols[1].metric("ISA A", f"{account_balances['ISA_A']:,.0f}원")
+    balance_cols[2].metric("ISA B", f"{account_balances['ISA_B']:,.0f}원")
+    balance_cols[3].metric("계산 대상 합계", f"{total_assets:,.0f}원")
+    st.caption("잔고를 바꾸려면 '내 자산 & 리밸런싱 (실전)' 화면의 사이드바 계좌 잔고 입력을 사용하세요.")
+
+    st.markdown("#### 목표 비중")
+    st.caption("현재 가정은 코스피 20% / 나스닥100 20% / 미국채30년 20% / 현금 40%입니다.")
+    weight_cols = st.columns(4)
+    target_weights = {}
+    for idx, asset in enumerate(BUY_HOLD_ASSET_BUCKETS):
+        default_pct = BUY_HOLD_BASELINE_WEIGHTS[asset] * 100
+        target_weights[asset] = (
+            weight_cols[idx].number_input(
+                asset,
+                min_value=0.0,
+                max_value=100.0,
+                value=float(default_pct),
+                step=1.0,
+                key=f"buy_hold_target_{asset}",
+            )
+            / 100.0
+        )
+
+    raw_total_pct = sum(target_weights.values()) * 100
+    if abs(raw_total_pct - 100.0) > 0.01:
+        st.warning(f"목표 비중 합계가 {raw_total_pct:.1f}%입니다. 계산표는 합계 100%로 정규화해 표시합니다.")
+
+    result = calculate_buy_hold_allocation(account_balances, target_weights)
+    table = result["table"].copy()
+    display_table = table.rename(columns=BUY_HOLD_ACCOUNT_DISPLAY)
+    for col in ["현재가정비중", "목표비중"]:
+        display_table[col] = display_table[col].map(lambda v: f"{float(v) * 100:.1f}%")
+    for col in ["현재가정금액", "목표금액", "추가매수_매도", "일반계좌", "ISA A", "ISA B"]:
+        display_table[col] = display_table[col].map(lambda v: f"{float(v):+,.0f}원" if col == "추가매수_매도" else f"{float(v):,.0f}원")
+
+    st.markdown("#### 계좌별 목표 배치 및 추가매수/매도")
+    st.dataframe(display_table, use_container_width=True, hide_index=True)
+    st.info("추가매수/매도는 실제 보유 원장이 아니라 20/20/20/40 현재 가정 대비 차이입니다.")
+    st.caption("이 화면은 계산 보조 도구이며 투자 권유나 자동 주문 기능이 아닙니다.")
+
+
 def main():
     KST = pytz.timezone('Asia/Seoul')
     current_dt = datetime.now(KST).replace(tzinfo=None)
@@ -6085,14 +6278,20 @@ def main():
 
     use_adj = st.sidebar.checkbox("수정주가 사용", value=True)
     price_col = "Adj Close" if use_adj else "Close"
-    options = ["1. 내 자산 & 리밸런싱 (실전)", "2. 전략 백테스트 (시장 분석)", "3. 몬테카를로 시뮬레이션"]
+    options = [
+        "1. 내 자산 & 리밸런싱 (실전)",
+        "2. 전략 백테스트 (시장 분석)",
+        "3. 몬테카를로 시뮬레이션",
+        "4. Buy & Hold 샌드박스",
+    ]
     if "mode_select" not in st.session_state or st.session_state["mode_select"] not in options:
         st.session_state["mode_select"] = options[0]
     mode = st.sidebar.radio("기능 선택", options, key="mode_select")
 
     if mode.startswith("1."): mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date)
     elif mode.startswith("2."): mode_strategy_backtest(current_dt, bt_end_date, price_col, bt_start_date)
-    else: mode_monte_carlo(current_dt, bt_end_date, price_col, bt_start_date, init_capital)
+    elif mode.startswith("3."): mode_monte_carlo(current_dt, bt_end_date, price_col, bt_start_date, init_capital)
+    else: mode_buy_hold_sandbox(current_dt)
 
     st.markdown("---")
     st.caption("ℹ️ 본 대시보드는 과거 데이터 기반이며 투자 권유가 아닙니다.")

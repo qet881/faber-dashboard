@@ -61,7 +61,9 @@ def test_backtest_haenam_display_uses_active_backtest_weights():
 def test_live_balance_defaults_recover_from_zero_state():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
-    assert "sum(float(st.session_state.get(key, 0) or 0) for key, _ in balance_defaults) <= 0" in source
+    assert "def _ensure_account_balance_state" in source
+    assert "sum(float(st.session_state.get(key, 0) or 0) for key, _ in selected_defaults) <= 0" in source
+    assert "_ensure_account_balance_state()" in source
 
 
 def test_live_signal_display_stays_on_base_assets_before_rebalance_expansion():
