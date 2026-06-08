@@ -2444,6 +2444,18 @@ def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col
     return rows
 
 
+def build_haenam_signal_display_rows(signal_rows):
+    """신호표는 집행 ETF가 아니라 기준 신호 자산 단위로 표시한다."""
+    rows = []
+    for row in signal_rows:
+        asset = row.get("자산명")
+        display_row = dict(row)
+        display_row["신호자산"] = asset
+        display_row["자산명"] = asset
+        rows.append(display_row)
+    return rows
+
+
 def build_faber_ex_bonds_strategy_data(base_all_data, start_date, end_date, include_china=False, include_india=False):
     """Faber A 변형(채권 제외) 전략용 데이터셋 구성."""
     if base_all_data is None:
@@ -5646,17 +5658,20 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
             "추천비중": faber_w,
             "_is_gold": ticker == '411060'
         })
-    df_results = pd.DataFrame(
+    df_results = pd.DataFrame(build_haenam_signal_display_rows(results))
+    df_rebalance_results = pd.DataFrame(
         expand_haenam_signal_rows(results, current_date, haenam_price_data, price_col=price_col)
     )
     cash_weight = max(0.0, 1.0 - float(df_results["추천비중"].sum()))
     cash_price = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or 10000.0
-    df_results = pd.concat([df_results, pd.DataFrame([{
+    cash_row = {
         "신호자산": CASH_NAME, "자산명": CASH_NAME, "티커": CASH_TICKER, "현재가": cash_price,
         "12M고점": None, "고점대비": None, "모멘텀": None,
         "기준신호": "-", "추천비중": cash_weight, "_is_gold": False
-    }])], ignore_index=True)
-    df_results_orig = df_results.copy()  # 리밸런싱용
+    }
+    df_results = pd.concat([df_results, pd.DataFrame([cash_row])], ignore_index=True)
+    df_rebalance_results = pd.concat([df_rebalance_results, pd.DataFrame([cash_row])], ignore_index=True)
+    df_results_orig = df_rebalance_results.copy()  # 리밸런싱용
     df_display = df_results.copy()
     # 금현물 표시명 변경
     if gold_source == "KODEX_REALTIME":
@@ -5753,7 +5768,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     st.subheader("💾 결과 다운로드")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        ex = df_results.drop(columns=["_is_gold"], errors="ignore").copy()
+        ex = df_results_orig.drop(columns=["_is_gold"], errors="ignore").copy()
         ex["모멘텀"] = ex["모멘텀"].apply(lambda x: x if pd.notna(x) else "-")
         ex["고점대비"] = ex["고점대비"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
         ex["추천비중"] = ex["추천비중"]*100

@@ -62,3 +62,16 @@ def test_live_balance_defaults_recover_from_zero_state():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
     assert "sum(float(st.session_state.get(key, 0) or 0) for key, _ in balance_defaults) <= 0" in source
+
+
+def test_live_signal_display_stays_on_base_assets_before_rebalance_expansion():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+
+    assert "def build_haenam_signal_display_rows" in source
+    assert "df_results = pd.DataFrame(build_haenam_signal_display_rows(results))" in source
+    assert re.search(
+        r"df_rebalance_results = pd\.DataFrame\(\s*"
+        r"expand_haenam_signal_rows\(results, current_date, haenam_price_data, price_col=price_col\)",
+        source,
+    )
+    assert "df_results_orig = df_rebalance_results.copy()  # 리밸런싱용" in source
