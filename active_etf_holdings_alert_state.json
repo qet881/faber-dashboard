@@ -1,8 +1,8 @@
 {
-  "last_message_hash": "a7e6f299aa4f1f90",
-  "last_message_key": "7153e4b37dce92e0",
+  "last_message_hash": "f996ce69f9e9b361",
+  "last_message_key": "8b5187e72d90c8b6",
   "last_messages": {},
-  "last_sent_at_kst": "2026-06-09T22:30:51.362990+09:00",
+  "last_sent_at_kst": "2026-06-09T22:46:54.392884+09:00",
   "last_status": {
     "0015B0": {
       "error": "",
@@ -1008,7 +1008,7 @@
       ],
       "issuer": "TIME",
       "name": "TIME 코스피액티브",
-      "source_hash": "2038c41c6ac90da8",
+      "source_hash": "dbc69bde508accd1",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=11&",
       "ticker": "385720"
     },
@@ -1354,10 +1354,10 @@
       ],
       "issuer": "TIME",
       "name": "TIME 미국나스닥100액티브",
-      "source_hash": "dba26fc7626bd800",
+      "source_hash": "2c1fa040ab79a665",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=2&",
       "ticker": "426030"
     }
   },
-  "updated_at_kst": "2026-06-09T22:30:51.362990+09:00"
+  "updated_at_kst": "2026-06-09T22:46:54.392884+09:00"
 }
