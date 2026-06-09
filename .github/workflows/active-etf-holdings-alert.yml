@@ -53,12 +53,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add active_etf_holdings_alert_state.json
-          git commit \
-            -m "Persist active ETF alert state for duplicate-safe reports" \
-            -m "Constraint: State is updated by scheduled GitHub Actions after official issuer-source runs.
-Confidence: high
-Scope-risk: narrow
-Directive: Keep this commit limited to active_etf_holdings_alert_state.json.
-Tested: Workflow writes only changed state file.
-Not-tested: Live Telegram send depends on repository secrets."
+          cat > /tmp/active-etf-state-commit-message.txt <<'EOF'
+          Persist active ETF alert state for duplicate-safe reports
+
+          Constraint: State is updated by scheduled GitHub Actions after official issuer-source runs.
+          Confidence: high
+          Scope-risk: narrow
+          Directive: Keep this commit limited to active_etf_holdings_alert_state.json.
+          Tested: Workflow writes only changed state file.
+          Not-tested: Live Telegram send depends on repository secrets.
+          EOF
+          git commit -F /tmp/active-etf-state-commit-message.txt
           git push

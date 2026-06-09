@@ -219,3 +219,12 @@ def test_github_workflow_bypasses_exact_minute_time_gate():
     source = WORKFLOW_SOURCE.read_text(encoding="utf-8")
 
     assert WORKFLOW_RUN_COMMAND in source
+
+
+def test_github_workflow_keeps_lore_commit_trailers_inside_run_block():
+    source = WORKFLOW_SOURCE.read_text(encoding="utf-8")
+
+    assert "git commit -F /tmp/active-etf-state-commit-message.txt" in source
+    assert "cat > /tmp/active-etf-state-commit-message.txt <<'EOF'" in source
+    for trailer in ("Confidence:", "Scope-risk:", "Directive:", "Tested:", "Not-tested:"):
+        assert f"\n{trailer}" not in source
