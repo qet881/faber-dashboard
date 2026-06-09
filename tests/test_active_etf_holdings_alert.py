@@ -71,6 +71,10 @@ def test_diff_detects_added_removed_top10_and_rank_changes():
     assert [holding.code for holding in diff.top10_entries] == ["NEW", "KKK"]
     assert [holding.code for holding in diff.top10_exits] == ["CCC", "JJJ"]
     assert ("AAA", 1, 2) in [(old.code, old.rank, new.rank) for old, new in diff.rank_changes]
+    assert ("BBB", 20.0, 31.0, 11.0) in [
+        (old.code, old.weight, new.weight, delta)
+        for old, new, delta in diff.weight_changes
+    ]
 
 
 def test_report_includes_changed_etfs_only_and_all_unchanged_message():
@@ -80,7 +84,7 @@ def test_report_includes_changed_etfs_only_and_all_unchanged_message():
         config1.ticker,
         holdings=[
             {"code": "NVDA", "name": "NVIDIA Corp", "weight": 35},
-            {"code": "BBB", "name": "Beta Cloud", "weight": 20},
+            {"code": "BBB", "name": "Beta Cloud", "weight": 24},
         ],
         date="2026-06-04",
     )
@@ -102,6 +106,9 @@ def test_report_includes_changed_etfs_only_and_all_unchanged_message():
     assert config1.ticker in report
     assert config2.ticker not in report
     assert "AI/반도체" in report
+    assert "변화 요약:" in report
+    assert "비중 확대:" in report
+    assert "Beta Cloud(BBB) 20.00%→24.00% (+4.00%p" in report
 
     all_results = [
         alert.SourceResult(True, "ok", config, make_snapshot(config.ticker))
@@ -153,9 +160,23 @@ def test_cli_fixture_dry_run_skips_state_write(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "[발송 예정 메시지]" in output
-    assert "--dry-run" in output
+    assert "[발송 예정 메시지]" not in output
+    assert "변화가 없는 ETF는 조용히 생략합니다." in output
     assert not state_path.exists()
+
+
+def test_missing_previous_snapshot_seeds_baseline_without_full_portfolio_report():
+    results = [
+        alert.SourceResult(True, "ok", config, make_snapshot(config.ticker))
+        for config in alert.ETFS
+    ]
+
+    report, diffs, _, should_update = alert.build_report(results, {}, alert.now_kst())
+
+    assert report is None
+    assert should_update is True
+    assert all(diff.baseline_only for diff in diffs.values())
+    assert all(not diff.added for diff in diffs.values())
 
 
 def test_message_key_ignores_dynamic_report_time():

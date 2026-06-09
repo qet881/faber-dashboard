@@ -24,6 +24,7 @@ DEFAULT_STATE_FILE = "active_etf_holdings_alert_state.json"
 FOOTER = "공식 운용사 PDF/엑셀 공시 기준 자동 요약이며, 투자 권유가 아닙니다."
 DEFAULT_OPENROUTER_MODEL = "google/gemma-3-12b-it:free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+WEIGHT_CHANGE_THRESHOLD = 0.25
 
 
 @dataclass(frozen=True)
@@ -80,10 +81,19 @@ class DiffResult:
     top10_entries: list[Holding]
     top10_exits: list[Holding]
     rank_changes: list[tuple[Holding, Holding]]
+    weight_changes: list[tuple[Holding, Holding, float]]
+    baseline_only: bool = False
 
     @property
     def has_changes(self) -> bool:
-        return bool(self.added or self.removed or self.top10_entries or self.top10_exits or self.rank_changes)
+        return bool(
+            self.added
+            or self.removed
+            or self.top10_entries
+            or self.top10_exits
+            or self.rank_changes
+            or self.weight_changes
+        )
 
 
 ETFS = [
@@ -427,7 +437,15 @@ def holdings_by_key(holdings: list[Holding]) -> dict[str, Holding]:
 
 def diff_snapshots(previous: Snapshot | None, latest: Snapshot) -> DiffResult:
     if previous is None:
-        return DiffResult(added=latest.holdings, removed=[], top10_entries=latest.holdings[:10], top10_exits=[], rank_changes=[])
+        return DiffResult(
+            added=[],
+            removed=[],
+            top10_entries=[],
+            top10_exits=[],
+            rank_changes=[],
+            weight_changes=[],
+            baseline_only=True,
+        )
 
     prev_map = holdings_by_key(previous.holdings)
     latest_map = holdings_by_key(latest.holdings)
@@ -443,22 +461,30 @@ def diff_snapshots(previous: Snapshot | None, latest: Snapshot) -> DiffResult:
         for key in latest_top.keys() & prev_top.keys()
         if latest_top[key].rank != prev_top[key].rank
     ]
+    weight_changes = [
+        (prev_map[key], latest_map[key], latest_map[key].weight - prev_map[key].weight)
+        for key in latest_map.keys() & prev_map.keys()
+        if abs(latest_map[key].weight - prev_map[key].weight) >= WEIGHT_CHANGE_THRESHOLD
+    ]
     return DiffResult(
         added=sorted(added, key=lambda h: h.rank),
         removed=sorted(removed, key=lambda h: h.rank),
         top10_entries=sorted(top10_entries, key=lambda h: h.rank),
         top10_exits=sorted(top10_exits, key=lambda h: h.rank),
         rank_changes=sorted(rank_changes, key=lambda pair: pair[1].rank),
+        weight_changes=sorted(weight_changes, key=lambda item: abs(item[2]), reverse=True),
     )
 
 
 THEME_RULES = [
-    ("AI/반도체", ["NVIDIA", "NVDA", "AMD", "BROADCOM", "AVGO", "MICRON", "MU", "SK하이닉스", "삼성전자", "반도체"]),
-    ("클라우드/빅테크", ["MICROSOFT", "MSFT", "ALPHABET", "GOOGL", "AMAZON", "AMZN", "META", "APPLE", "AAPL"]),
-    ("전력/인프라", ["LS", "효성중공업", "HD현대중공업", "두산", "산일전기", "BLOOM"]),
-    ("자동차/전장", ["현대차", "현대모비스", "TESLA", "TSLA", "삼성전기"]),
-    ("금융", ["KB금융", "삼성화재", "은행", "FINANCIAL"]),
-    ("현금", ["현금", "예금", "CASH", "KRD0100"]),
+    ("AI/반도체", ["NVIDIA", "NVDA", "AMD", "BROADCOM", "AVGO", "MICRON", "MU", "ARM", "INTEL", "SK하이닉스", "삼성전자", "삼성전기", "반도체"]),
+    ("빅테크/클라우드", ["MICROSOFT", "MSFT", "ALPHABET", "GOOGL", "GOOGLE", "AMAZON", "AMZN", "META", "APPLE", "AAPL", "ORACLE", "CLOUD"]),
+    ("전력/인프라", ["LS", "효성중공업", "HD현대일렉트릭", "두산", "산일전기", "일진전기", "BLOOM", "전력", "인프라"]),
+    ("자동차/전장", ["현대차", "현대모비스", "기아", "TESLA", "TSLA", "전장"]),
+    ("조선/방산/산업재", ["HD현대중공업", "한화오션", "현대로템", "LIG넥스원", "방산", "조선"]),
+    ("금융/지주", ["KB금융", "신한지주", "하나금융", "삼성화재", "은행", "FINANCIAL"]),
+    ("바이오/헬스케어", ["셀트리온", "삼성바이오", "BIO", "HEALTH", "PHARMA"]),
+    ("현금/단기채", ["현금", "예금", "CASH", "KRD0100", "MMF"]),
 ]
 
 
@@ -473,33 +499,71 @@ def fmt_holding(holding: Holding) -> str:
     return f"{holding.rank}위 {holding.name}{code} {holding.weight:.2f}%"
 
 
+def fmt_weight_change(old: Holding, new: Holding, delta: float) -> str:
+    code = f"({new.code})" if new.code else ""
+    return f"{new.name}{code} {old.weight:.2f}%→{new.weight:.2f}% ({delta:+.2f}%p, {old.rank}→{new.rank}위)"
+
+
+def holdings_weighted_up(diff: DiffResult) -> list[Holding]:
+    promotions = [new for old, new in diff.rank_changes if new.rank < old.rank]
+    increases = [new for _, new, delta in diff.weight_changes if delta > 0]
+    return diff.added + diff.top10_entries + promotions + increases
+
+
+def holdings_weighted_down(diff: DiffResult) -> list[Holding]:
+    demotions = [old for old, new in diff.rank_changes if new.rank > old.rank]
+    decreases = [new for _, new, delta in diff.weight_changes if delta < 0]
+    return diff.removed + diff.top10_exits + demotions + decreases
+
+
 def changed_holdings_for_comment(diff: DiffResult) -> list[Holding]:
-    return diff.added + diff.removed + diff.top10_entries + diff.top10_exits + [new for _, new in diff.rank_changes]
+    return (
+        diff.added
+        + diff.removed
+        + diff.top10_entries
+        + diff.top10_exits
+        + [new for _, new in diff.rank_changes]
+        + [new for _, new, _ in diff.weight_changes]
+    )
 
 
 def fallback_one_liner(diff: DiffResult) -> str:
-    themes = infer_themes(changed_holdings_for_comment(diff))
-    if themes:
-        return "변화 종목 기준으로 " + ", ".join(themes) + " 쪽 노출 조정이 보입니다."
-    return "특정 테마로 단정하기 어려운 보유종목 재배치입니다."
+    up_themes = infer_themes(holdings_weighted_up(diff))
+    down_themes = infer_themes(holdings_weighted_down(diff))
+    if up_themes and down_themes:
+        return f"{', '.join(up_themes)}를 늘리고 {', '.join(down_themes)}를 덜어내는 리밸런싱입니다."
+    if up_themes:
+        return f"{', '.join(up_themes)} 쪽 비중을 키우는 공격적 베팅으로 보입니다."
+    if down_themes:
+        return f"{', '.join(down_themes)} 노출을 줄이며 포지션을 정리하는 변화입니다."
+    if diff.weight_changes:
+        old, new, delta = diff.weight_changes[0]
+        direction = "확대" if delta > 0 else "축소"
+        return f"{new.name} 비중을 {abs(delta):.2f}%p {direction}한 점이 가장 큰 변화입니다."
+    return "뚜렷한 섹터 베팅보다는 보유종목 내부의 미세 조정에 가깝습니다."
 
 
 def diff_prompt_payload(snapshot: Snapshot, diff: DiffResult) -> dict[str, Any]:
+    weight_increases = [(old, new, delta) for old, new, delta in diff.weight_changes if delta > 0]
+    weight_decreases = [(old, new, delta) for old, new, delta in diff.weight_changes if delta < 0]
     return {
         "etf": {"ticker": snapshot.ticker, "name": snapshot.name, "date": snapshot.disclosure_date},
         "added": [fmt_holding(h) for h in diff.added[:8]],
         "removed": [fmt_holding(h) for h in diff.removed[:8]],
         "top10_entries": [fmt_holding(h) for h in diff.top10_entries[:8]],
         "top10_exits": [fmt_holding(h) for h in diff.top10_exits[:8]],
-        "rank_changes": [f"{new.name} {old.rank}->{new.rank}위" for old, new in diff.rank_changes[:8]],
+        "rank_up": [f"{new.name} {old.rank}->{new.rank}위" for old, new in diff.rank_changes if new.rank < old.rank][:8],
+        "rank_down": [f"{new.name} {old.rank}->{new.rank}위" for old, new in diff.rank_changes if new.rank > old.rank][:8],
+        "weight_increases": [fmt_weight_change(old, new, delta) for old, new, delta in weight_increases[:8]],
+        "weight_decreases": [fmt_weight_change(old, new, delta) for old, new, delta in weight_decreases[:8]],
     }
 
 
 def sanitize_one_liner(text: str) -> str:
     cleaned = " ".join(str(text or "").strip().split())
     cleaned = re.sub(r"^(한줄평|해석)\s*[:：]\s*", "", cleaned)
-    if len(cleaned) > 90:
-        cleaned = cleaned[:87].rstrip() + "..."
+    if len(cleaned) > 120:
+        cleaned = cleaned[:117].rstrip() + "..."
     return cleaned
 
 
@@ -524,14 +588,16 @@ def generate_gemma_one_liner(snapshot: Snapshot, diff: DiffResult) -> str | None
                         "role": "system",
                         "content": (
                             "너는 액티브 ETF 보유종목 변화 리포트를 쓰는 한국어 애널리스트다. "
-                            "제공된 변화만 근거로 ETF 매니저가 어디에 무게를 둔 것처럼 보이는지 "
-                            "한 문장으로만 말한다. 투자 권유, 확정적 단정, 상투적인 표현은 피한다."
+                            "현재 포트폴리오를 요약하지 말고, 제공된 전일 대비 변화만 근거로 "
+                            "매니저가 무엇을 늘리고 줄였는지와 그 의도가 어떤 베팅으로 보이는지만 말한다. "
+                            "투자 권유, 확정적 단정, 상투적인 표현은 피한다."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            "아래 ETF 보유종목 변화만 보고 45자 안팎의 한국어 한줄평 1개만 써줘. "
+                            "아래 ETF 보유종목 변화만 보고 80자 안팎의 한국어 해석 문장 1개만 써줘. "
+                            "무엇을 늘렸고 무엇을 줄였는지, 그게 어떤 베팅으로 보이는지 드러나야 해. "
                             "접두어 없이 문장만 출력해.\n"
                             + json.dumps(diff_prompt_payload(snapshot, diff), ensure_ascii=False)
                         ),
@@ -557,18 +623,30 @@ def one_liner(snapshot: Snapshot, diff: DiffResult) -> str:
 
 def render_etf_section(snapshot: Snapshot, diff: DiffResult) -> str:
     lines = [f"[{snapshot.ticker}] {snapshot.name}", f"기준일: {snapshot.disclosure_date or '확인 불가'}"]
-    lines.append("한줄평: " + one_liner(snapshot, diff))
+    lines.append("해석: " + one_liner(snapshot, diff))
+    lines.append(
+        "변화 요약: "
+        f"신규 {len(diff.added)} / 제외 {len(diff.removed)} / "
+        f"Top10 진입 {len(diff.top10_entries)} / 이탈 {len(diff.top10_exits)} / "
+        f"비중변화 {len(diff.weight_changes)}개(±{WEIGHT_CHANGE_THRESHOLD:.2f}%p 이상)"
+    )
 
     if diff.added:
         lines.append("신규 편입: " + "; ".join(fmt_holding(h) for h in diff.added[:5]))
     if diff.removed:
         lines.append("제외/소멸: " + "; ".join(fmt_holding(h) for h in diff.removed[:5]))
+    increases = [(old, new, delta) for old, new, delta in diff.weight_changes if delta > 0]
+    decreases = [(old, new, delta) for old, new, delta in diff.weight_changes if delta < 0]
+    if increases:
+        lines.append("비중 확대: " + "; ".join(fmt_weight_change(old, new, delta) for old, new, delta in increases[:5]))
+    if decreases:
+        lines.append("비중 축소: " + "; ".join(fmt_weight_change(old, new, delta) for old, new, delta in decreases[:5]))
     if diff.top10_entries:
         lines.append("Top10 진입: " + "; ".join(fmt_holding(h) for h in diff.top10_entries[:5]))
     if diff.top10_exits:
         lines.append("Top10 이탈: " + "; ".join(fmt_holding(h) for h in diff.top10_exits[:5]))
     if diff.rank_changes:
-        changes = [f"{new.name} {old.rank}->{new.rank}위" for old, new in diff.rank_changes[:5]]
+        changes = [f"{new.name} {old.rank}→{new.rank}위" for old, new in diff.rank_changes[:5]]
         lines.append("Top10 순위 변화: " + "; ".join(changes))
     lines.append(f"출처: {snapshot.source_url}")
     return "\n".join(lines)
@@ -603,6 +681,8 @@ def build_report(
         if failed_results:
             status_lines.append("소스 실패: " + "; ".join(f"{r.config.ticker} {r.status}" for r in failed_results))
         return "\n\n".join([header, *changed_sections, *status_lines, FOOTER]), diffs, failed_results, True
+    if any(diff.baseline_only for diff in diffs.values()):
+        return None, diffs, failed_results, True
     if all_four_valid:
         return "4개 모두 변화없음.", diffs, failed_results, True
     return None, diffs, failed_results, True
