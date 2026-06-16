@@ -30,7 +30,7 @@ def test_live_mode_static_portfolio_backtest_uses_live_scope_values():
     } & referenced_globals
 
 
-def test_live_mode_haenam_mdd_uses_same_active_builder_as_backtest():
+def test_live_mode_haenam_m_mdd_uses_same_builder_as_backtest():
     live_mode = _function_symbol_table("mode_live_and_rebalance")
     referenced_globals = {
         symbol.get_name()
@@ -38,24 +38,59 @@ def test_live_mode_haenam_mdd_uses_same_active_builder_as_backtest():
         if symbol.is_referenced() and symbol.is_global()
     }
 
-    assert "build_faber_active_nasdaq_kr_active_data" in referenced_globals
+    assert "build_haenam_m_strategy_data" in referenced_globals
     assert "build_faber_active_nasdaq_kr_semi_data" not in referenced_globals
 
 
-def test_backtest_haenam_display_uses_active_backtest_weights():
+def test_backtest_haenam_m_display_uses_active_execution_weights():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
-    assert "def expand_haenam_active_backtest_weights" in source
+    assert "def expand_haenam_m_execution_weights" in source
     assert re.search(
-        r"FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL:\s*\(\s*lambda d: "
-        r"expand_haenam_active_backtest_weights",
-        source,
-    )
-    assert re.search(
-        r"w = expand_haenam_active_backtest_weights\(base_w, d\) "
+        r"w = expand_haenam_m_execution_weights\(base_w, d\) "
         r"if primary_is_haenam else base_w",
         source,
     )
+
+
+def test_strategy_backtest_primary_path_uses_haenam_m_builder():
+    backtest_mode = _function_symbol_table("mode_strategy_backtest")
+    referenced_globals = {
+        symbol.get_name()
+        for symbol in backtest_mode.get_symbols()
+        if symbol.is_referenced() and symbol.is_global()
+    }
+    source = APP_SOURCE.read_text(encoding="utf-8")
+
+    assert "build_faber_active_nasdaq_kr_active_data" in referenced_globals
+    assert "haenam_m_strategy_data = faber_active_nasdaq_kr_active_data" in source
+    assert "primary_strategy_data = haenam_m_strategy_data if mom_kr_active_nav is not None else all_data" in source
+
+
+def test_active_backtest_weight_expansion_keeps_nasdaq_active():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    execution_block = re.search(
+        r"def expand_haenam_execution_weights\(.*?\n(?=def expand_haenam_active_backtest_weights)",
+        source,
+        flags=re.S,
+    )
+    active_backtest_block = re.search(
+        r"def expand_haenam_active_backtest_weights\(.*?\n(?=def expand_haenam_signal_rows)",
+        source,
+        flags=re.S,
+    )
+
+    assert execution_block is not None
+    assert active_backtest_block is not None
+    assert re.search(
+        r"elif asset == NASDAQ100_ASSET_NAME:\s*"
+        r"if nasdaq_active:\s*"
+        r"targets = _nasdaq_active_execution_targets\(as_of_date\)",
+        execution_block.group(0),
+    )
+    assert "else:\n                out[asset] = out.get(asset, 0.0) + w" in execution_block.group(0)
+    assert "if nasdaq_active" not in active_backtest_block.group(0)
+    assert "_nasdaq_active_execution_targets(as_of_date)" in active_backtest_block.group(0)
 
 
 def test_live_balance_defaults_recover_from_zero_state():
@@ -66,17 +101,21 @@ def test_live_balance_defaults_recover_from_zero_state():
     assert "_ensure_account_balance_state()" in source
 
 
-def test_live_signal_display_stays_on_base_assets_before_rebalance_expansion():
+def test_live_signal_display_uses_haenam_m_execution_assets():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
     assert "def build_haenam_signal_display_rows" in source
     assert "df_results = pd.DataFrame(build_haenam_signal_display_rows(results))" in source
     assert re.search(
         r"df_rebalance_results = pd\.DataFrame\(\s*"
-        r"expand_haenam_signal_rows\(results, current_date, haenam_price_data, price_col=price_col\)",
+        r"expand_haenam_signal_rows\(\s*"
+        r"results, current_date, haenam_price_data, price_col=price_col\s*"
+        r"\)\s*"
+        r"\)",
         source,
     )
     assert "df_results_orig = df_rebalance_results.copy()  # 리밸런싱용" in source
+    assert "df_display = df_rebalance_results.copy()" in source
 
 
 def test_live_current_drawdown_reports_daily_and_monthly_reference_levels():
