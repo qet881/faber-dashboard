@@ -761,6 +761,17 @@ FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL = '해남 A'
 FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL = '해남 A (한국=삼성전자)'
 FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL = '해남 A (한국=SK하이닉스)'
 FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL = '해남 A (한국=삼성전자/하이닉스)'
+# 한국 슬롯을 코스피200 패시브(지수 그대로)로 집행하는 변형. 나스닥은 다른 해남 A와 동일하게
+# 액티브 집행이라, 나스닥 액티브 집행 데이터셋(build_faber_nasdaq_active_execution_data)이 곧
+# 이 변형과 동일한 NAV가 된다(한국 슬롯에 별도 오버레이를 얹지 않으면 코스피200 지수 유지).
+FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '해남 A (한국=코스피200 패시브)'
+# 위 5개 해남 A 변형과 한국 슬롯/나스닥(액티브)·나머지 슬롯은 동일하게 두고, 신호(투자 방법)만
+# 연속 모멘텀(simulate_daily_nav_with_attribution, 0.2×12개월 모멘텀 점수)으로 바꾼 비교군.
+MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL = '연속모멘텀 (한국=코스피 액티브 2종)'
+MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL = '연속모멘텀 (한국=삼성전자)'
+MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL = '연속모멘텀 (한국=SK하이닉스)'
+MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL = '연속모멘텀 (한국=삼성전자/하이닉스)'
+MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '연속모멘텀 (한국=코스피200 패시브)'
 HAENAM_SAMSUNG_NAME = '삼성전자'
 HAENAM_HYNIX_NAME = 'SK하이닉스'
 HAENAM_TIME_NAME = 'TIME 나스닥100액티브'
@@ -4445,6 +4456,37 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         )[0]
         if faber_active_nasdaq_kr_semi_data is not None else None
     )
+    # 연속 모멘텀(이전 전략) 신호로 같은 한국 슬롯 변형 + 나스닥 액티브 집행을 돌린 비교군.
+    # 한국=삼성/하이닉스 50:50은 위 old_haenam_nav와 동일하므로 재사용한다.
+    mom_kr_active_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_active_data,
+            price_col=price_col
+        )[0]
+        if faber_active_nasdaq_kr_active_data is not None else None
+    )
+    mom_kr_samsung_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_samsung_data,
+            price_col=price_col
+        )[0]
+        if faber_active_nasdaq_kr_samsung_data is not None else None
+    )
+    mom_kr_hynix_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, faber_active_nasdaq_kr_hynix_data,
+            price_col=price_col
+        )[0]
+        if faber_active_nasdaq_kr_hynix_data is not None else None
+    )
+    mom_kr_semi_nav = old_haenam_nav
+    mom_kr_passive_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, faber_nasdaq_active_data,
+            price_col=price_col
+        )[0]
+        if faber_nasdaq_active_data is not None else None
+    )
     primary_nav_df = faber_active_nasdaq_kr_active_nav if faber_active_nasdaq_kr_active_nav is not None else nav_df
     primary_strategy_data = faber_active_nasdaq_kr_active_data if faber_active_nasdaq_kr_active_data is not None else all_data
     primary_price_data = haenam_price_data if faber_active_nasdaq_kr_active_nav is not None else all_data
@@ -4644,15 +4686,21 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
+    # 모든 변형이 나스닥 슬롯(액티브 집행)·채권·금·현금 슬롯은 동일하고, 두 축만 다르다:
+    #   (A) 한국주식 20% 슬롯 집행: 코스피 액티브 2종(현버전)/삼성전자/SK하이닉스/삼성·하이닉스 50:50/코스피200 패시브
+    #   (B) 투자 방법(신호): Faber A(코스피200/나스닥100 -5% 룰) vs 연속 모멘텀(0.2×12개월 모멘텀 점수)
+    # 한국 슬롯별로 Faber↔연속모멘텀을 바로 옆에 붙여, 같은 자산에서 어느 신호가 나은지 한눈에 비교한다.
     quant_labels = [
-        FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL,
-        FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL,
-        FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,
-        FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL,
-        faber_base_label,
-        old_haenam_label,
-        "이전 전략(연속 모멘텀)",
-        FABER_NASDAQ_ACTIVE_EXEC_LABEL,
+        FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL,      # 코스피 액티브 2종 — Faber
+        MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL,      # 코스피 액티브 2종 — 연속모멘텀
+        FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,   # 삼성전자 — Faber
+        MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,     # 삼성전자 — 연속모멘텀
+        FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL,     # SK하이닉스 — Faber
+        MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL,       # SK하이닉스 — 연속모멘텀
+        FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL,  # 삼성/하이닉스 50:50 — Faber
+        MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL,    # 삼성/하이닉스 50:50 — 연속모멘텀
+        FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,   # 코스피200 패시브 — Faber
+        MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,     # 코스피200 패시브 — 연속모멘텀
     ]
     st.caption(
         "✅ 기준 확인: "
@@ -4671,6 +4719,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             return None
         period_initial = float(nav["nav"].iloc[0])
         _, _, mdd, cagr = calculate_performance_metrics(nav, period_initial)
+        monthly_mdd = calculate_monthly_mdd(nav)
         sharpe  = calculate_sharpe_ratio(nav)
         sortino = calculate_sortino_ratio(nav)
         volatility = calculate_annualized_volatility(nav)
@@ -4679,7 +4728,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         cvar_5 = calculate_monthly_cvar(nav, alpha=0.05)
         pos_month = calculate_positive_month_ratio(nav)
         cagr_mdd = (cagr / abs(mdd)) if (cagr is not None and cagr > 0 and mdd is not None and mdd < 0) else None
-        return {"cagr": cagr, "mdd": mdd, "sharpe": sharpe,
+        return {"cagr": cagr, "mdd": mdd, "monthly_mdd": monthly_mdd, "sharpe": sharpe,
                 "sortino": sortino, "volatility": volatility, "cagr_mdd": cagr_mdd,
                 "ulcer": ulcer, "martin": martin, "cvar_5": cvar_5,
                 "pos_month": pos_month}
@@ -4689,13 +4738,20 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     quant_strategies = {
         FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: faber_active_nasdaq_kr_active_nav,
-        FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: faber_active_nasdaq_kr_semi_nav,
         FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: faber_active_nasdaq_kr_samsung_nav,
         FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL: faber_active_nasdaq_kr_hynix_nav,
+        FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: faber_active_nasdaq_kr_semi_nav,
+        # 한국=코스피200 패시브는 나스닥 액티브 집행 데이터셋과 NAV가 동일하다(한국 슬롯에 오버레이 미적용).
+        FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: faber_nasdaq_active_nav,
+        # 같은 한국 슬롯 조합을 연속 모멘텀 신호로 집행한 짝(나스닥은 동일하게 액티브 집행).
+        MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL: mom_kr_active_nav,
+        MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: mom_kr_samsung_nav,
+        MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL: mom_kr_hynix_nav,
+        MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: mom_kr_semi_nav,
+        MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: mom_kr_passive_nav,
+        # 표에는 노출하지 않지만 아래 'Faber A 원형 승률'·'해남 A 하락 민감도' 계산에 필요해 정렬 대상에 유지.
         faber_base_label: nav_df,
-        old_haenam_label: old_haenam_nav,
         "이전 전략(연속 모멘텀)": old_nav,
-        FABER_NASDAQ_ACTIVE_EXEC_LABEL: faber_nasdaq_active_nav,
     }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
         quant_strategies, min_obs_days=252
@@ -4756,18 +4812,37 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     kr_weights={"hynix": 1.0}
                 ) if faber_active_nasdaq_kr_hynix_nav is not None else None
             ),
-            faber_base_label: lambda d: calculate_faber_weights(d, all_data, mode='A', price_col=price_col),
-            old_haenam_label: (
-                lambda d: expand_haenam_execution_weights(
-                    calculate_weights_at_date(d, all_data, price_col=price_col), d,
-                    kr_weights={"samsung": 0.5, "hynix": 0.5}
-                ) if old_haenam_nav is not None else None
-            ),
-            "이전 전략(연속 모멘텀)": lambda d: calculate_weights_at_date(d, all_data, price_col=price_col),
-            FABER_NASDAQ_ACTIVE_EXEC_LABEL: (
+            FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: (
                 lambda d: calculate_faber_weights(
                     d, faber_nasdaq_active_data, mode='A', price_col=price_col
                 ) if faber_nasdaq_active_data is not None else None
+            ),
+            MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL: (
+                lambda d: expand_haenam_active_backtest_weights(
+                    calculate_weights_at_date(d, all_data, price_col=price_col), d
+                ) if mom_kr_active_nav is not None else None
+            ),
+            MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: (
+                lambda d: expand_haenam_execution_weights(
+                    calculate_weights_at_date(d, all_data, price_col=price_col), d,
+                    kr_weights={"samsung": 1.0}
+                ) if mom_kr_samsung_nav is not None else None
+            ),
+            MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL: (
+                lambda d: expand_haenam_execution_weights(
+                    calculate_weights_at_date(d, all_data, price_col=price_col), d,
+                    kr_weights={"hynix": 1.0}
+                ) if mom_kr_hynix_nav is not None else None
+            ),
+            MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: (
+                lambda d: expand_haenam_execution_weights(
+                    calculate_weights_at_date(d, all_data, price_col=price_col), d,
+                    kr_weights={"samsung": 0.5, "hynix": 0.5}
+                ) if mom_kr_semi_nav is not None else None
+            ),
+            MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: (
+                lambda d: calculate_weights_at_date(d, all_data, price_col=price_col)
+                if mom_kr_passive_nav is not None else None
             ),
             FABER_EX_BONDS_3_LABEL: (
                 lambda d: calculate_faber_weights_for_assets(
@@ -4787,13 +4862,15 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         }
         turnover_keys = {
             FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: haenam_active_turnover_keys,
-            FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: haenam_semi_turnover_keys,
             FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: haenam_semi_turnover_keys,
             FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL: haenam_semi_turnover_keys,
-            faber_base_label: full_keys,
-            old_haenam_label: haenam_semi_turnover_keys,
-            "이전 전략(연속 모멘텀)": full_keys,
-            FABER_NASDAQ_ACTIVE_EXEC_LABEL: full_keys,
+            FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: haenam_semi_turnover_keys,
+            FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
+            MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL: haenam_active_turnover_keys,
+            MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: haenam_semi_turnover_keys,
+            MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL: haenam_semi_turnover_keys,
+            MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: haenam_semi_turnover_keys,
+            MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
         }
         for name in quant_labels:
             builder = weight_builders.get(name)
@@ -4816,31 +4893,66 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         win5, n5 = calculate_rolling_outperformance_rate(qf, qo, window_months=60)
 
     if all(quant_metrics.get(name) is not None for name in quant_labels):
+        # (지표명, quant_metrics 키, 표시 포맷, 좋은 방향) — 방향은 행별 최우수 셀 강조에 쓴다.
         metric_specs = [
-            ("CAGR", "cagr", "{:.2%}"),
-            ("MDD (일별)", "mdd", "{:.2%}"),
-            ("변동성 (위험)", "volatility", "{:.2%}"),
-            ("Sharpe", "sharpe", "{:.2f}"),
-            ("Sortino", "sortino", "{:.2f}"),
-            ("CAGR / MDD", "cagr_mdd", "{:.2f}"),
-            ("Ulcer Index", "ulcer", "{:.2f}"),
-            ("Martin Ratio", "martin", "{:.2f}"),
-            ("CVaR 5% (월)", "cvar_5", "{:.2%}"),
-            ("양(+)월 비율", "pos_month", "{:.1%}"),
+            ("CAGR", "cagr", "{:.2%}", "max"),
+            ("MDD (일별)", "mdd", "{:.2%}", "max"),          # 덜 빠질수록(0에 가까울수록) 우수
+            ("MDD (월말)", "monthly_mdd", "{:.2%}", "max"),  # 월말 종가 기준 최대 낙폭
+            ("변동성 (위험)", "volatility", "{:.2%}", "min"),
+            ("Sharpe", "sharpe", "{:.2f}", "max"),
+            ("Sortino", "sortino", "{:.2f}", "max"),
+            ("CAGR / MDD", "cagr_mdd", "{:.2f}", "max"),
+            ("Ulcer Index", "ulcer", "{:.2f}", "min"),
+            ("Martin Ratio", "martin", "{:.2f}", "max"),
+            ("CVaR 5% (월)", "cvar_5", "{:.2%}", "max"),     # 덜 손실일수록(0에 가까울수록) 우수
+            ("양(+)월 비율", "pos_month", "{:.1%}", "max"),
         ]
+        row_directions = {}
         comparison_rows = []
-        for row_label, key, fmt in metric_specs:
+        for row_label, key, fmt, direction in metric_specs:
+            row_directions[row_label] = direction
             comparison_rows.append(
                 tuple([row_label] + [_fmt(quant_metrics[name].get(key), fmt) for name in quant_labels])
             )
+        row_directions["평균 월회전율(추정)"] = "min"
         comparison_rows.append(
             tuple(["평균 월회전율(추정)"] + [_fmt(turnover_stats[name][0], "{:.1%}") for name in quant_labels])
         )
+        row_directions["최대 월회전율(추정)"] = "min"
         comparison_rows.append(
             tuple(["최대 월회전율(추정)"] + [_fmt(turnover_stats[name][1], "{:.1%}") for name in quant_labels])
         )
         df_cmp = pd.DataFrame(comparison_rows, columns=["지표"] + quant_labels)
-        st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+
+        def _parse_metric_cell(s):
+            if s is None or s == "-":
+                return None
+            try:
+                return float(str(s).replace("%", "").replace(",", "").strip())
+            except ValueError:
+                return None
+
+        def _highlight_best_in_row(row):
+            """각 지표 행에서 '좋은 방향' 기준 최우수 셀(동률 포함)에 초록 배경을 입힌다."""
+            styles = ["" for _ in row.index]
+            direction = row_directions.get(row["지표"])
+            if direction is None:
+                return styles
+            vals = {col: _parse_metric_cell(row[col]) for col in quant_labels}
+            nums = [v for v in vals.values() if v is not None]
+            if not nums:
+                return styles
+            best = max(nums) if direction == "max" else min(nums)
+            for i, col in enumerate(row.index):
+                if col in quant_labels and vals.get(col) is not None and abs(vals[col] - best) < 1e-9:
+                    styles[i] = "background-color: #c6efce; color: #006100; font-weight: 600"
+            return styles
+
+        st.caption("🟩 각 지표(행)에서 가장 좋은 값에 초록색 표시 — 한눈에 우열 비교용(동률이면 함께 표시).")
+        st.dataframe(
+            df_cmp.style.apply(_highlight_best_in_row, axis=1),
+            use_container_width=True, hide_index=True,
+        )
         if win3 is not None or win5 is not None:
             rel_rows = [{
                 "상대지표": "Faber A 원형 승률 (3년 롤링, 누적수익률 기준)",
