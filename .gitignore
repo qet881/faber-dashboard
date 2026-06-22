@@ -10,3 +10,6 @@ faber-investment-memory/
 # OS
 .DS_Store
 Thumbs.db
+
+# Tooling workspace (agent cache/logs/plans — not project source)
+.omx/
