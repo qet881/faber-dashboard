@@ -1,0 +1,44 @@
+﻿asset,symbol,group,status,rows,start,end
+US Large Cap,SPY,core,ok,6899,1999-01-04,2026-06-08
+Nasdaq 100,QQQ,core,ok,6854,1999-03-10,2026-06-08
+US Small Cap,IWM,core,ok,6546,2000-05-26,2026-06-08
+Developed ex-US,EFA,core,ok,6231,2001-08-27,2026-06-08
+Emerging Markets,EEM,core,ok,5825,2003-04-14,2026-06-08
+Long Treasury,TLT,core,ok,6003,2002-07-30,2026-06-08
+Intermediate Treasury,IEF,core,ok,6003,2002-07-30,2026-06-08
+Short Treasury,SHY,core,ok,6003,2002-07-30,2026-06-08
+Gold,GLD,core,ok,5421,2004-11-18,2026-06-08
+Commodities,DBC,core,ok,5116,2006-02-06,2026-06-08
+US REIT,VNQ,core,ok,5457,2004-09-29,2026-06-08
+Bitcoin,BTC-USD,core,ok,4284,2014-09-17,2026-06-09
+KOSPI200 ETF,069500.KS,korea,ok,4200,2007-01-29,2026-06-09
+KOSPI200 Index,^KS200,korea,ok,6712,1999-01-05,2026-06-09
+KOSDAQ150 ETF,229200.KS,korea,ok,2589,2015-10-01,2026-06-09
+Korea Nasdaq100 ETF,133690.KS,korea,ok,3814,2010-10-18,2026-06-09
+Samsung Electronics,005930.KS,korea,ok,6607,2000-01-04,2026-06-09
+SK Hynix,000660.KS,korea,ok,5829,2002-12-27,2026-06-09
+Korea 10Y Bond ETF,148070.KS,korea,ok,3562,2011-10-20,2026-06-09
+Korea 30Y Bond ETF,476760.KS,korea,ok,541,2024-03-12,2026-06-09
+Korea Gold ETF,411060.KS,korea,ok,1071,2021-12-15,2026-06-09
+USD/KRW,USDKRW=X,korea,ok,5841,2003-12-01,2026-06-09
+Technology,XLK,extended,ok,6899,1999-01-04,2026-06-08
+Financials,XLF,extended,ok,6899,1999-01-04,2026-06-08
+Energy,XLE,extended,ok,6899,1999-01-04,2026-06-08
+Health Care,XLV,extended,ok,6899,1999-01-04,2026-06-08
+Industrials,XLI,extended,ok,6899,1999-01-04,2026-06-08
+Consumer Staples,XLP,extended,ok,6899,1999-01-04,2026-06-08
+Consumer Discretionary,XLY,extended,ok,6899,1999-01-04,2026-06-08
+Utilities,XLU,extended,ok,6899,1999-01-04,2026-06-08
+US Value,VTV,extended,ok,5624,2004-01-30,2026-06-08
+US Growth,VUG,extended,ok,5624,2004-01-30,2026-06-08
+Momentum,MTUM,extended,ok,3305,2013-04-18,2026-06-08
+Quality,QUAL,extended,ok,3242,2013-07-18,2026-06-08
+Min Volatility,USMV,extended,ok,3678,2011-10-20,2026-06-08
+Japan,EWJ,extended,ok,6899,1999-01-04,2026-06-08
+Germany,EWG,extended,ok,6899,1999-01-04,2026-06-08
+United Kingdom,EWU,extended,ok,6899,1999-01-04,2026-06-08
+India,INDA,extended,ok,3606,2012-02-03,2026-06-08
+China,MCHI,extended,ok,3819,2011-03-31,2026-06-08
+Silver,SLV,extended,ok,5059,2006-04-28,2026-06-08
+Oil,USO,extended,ok,5072,2006-04-10,2026-06-08
+Agriculture,DBA,extended,ok,4886,2007-01-05,2026-06-08

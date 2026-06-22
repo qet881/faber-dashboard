@@ -1,0 +1,431 @@
+﻿asset,symbol,group,strategy,date,price,exposure,above_count,stacked,high_52w,near_52w_high
+US Large Cap,SPY,core,ma5,2026-06-08,739.219970703125,0.6,3,True,False,False
+US Large Cap,SPY,core,ma4,2026-06-08,739.219970703125,0.75,3,True,False,False
+US Large Cap,SPY,core,ma5_52w_high,2026-06-08,739.219970703125,0.0,3,True,False,False
+US Large Cap,SPY,core,ma4_52w_high,2026-06-08,739.219970703125,0.0,3,True,False,False
+US Large Cap,SPY,core,ma5_52w_near5,2026-06-08,739.219970703125,0.6,3,True,False,True
+US Large Cap,SPY,core,ma4_52w_near5,2026-06-08,739.219970703125,0.75,3,True,False,True
+US Large Cap,SPY,core,ma5_stack_hard,2026-06-08,739.219970703125,0.6,3,True,False,False
+US Large Cap,SPY,core,ma4_stack_hard,2026-06-08,739.219970703125,0.75,3,True,False,False
+US Large Cap,SPY,core,ma5_stack_half,2026-06-08,739.219970703125,0.6,3,True,False,False
+US Large Cap,SPY,core,ma4_stack_half,2026-06-08,739.219970703125,0.75,3,True,False,False
+Nasdaq 100,QQQ,core,ma5,2026-06-08,716.0700073242188,0.6,3,True,False,False
+Nasdaq 100,QQQ,core,ma4,2026-06-08,716.0700073242188,0.75,3,True,False,False
+Nasdaq 100,QQQ,core,ma5_52w_high,2026-06-08,716.0700073242188,0.0,3,True,False,False
+Nasdaq 100,QQQ,core,ma4_52w_high,2026-06-08,716.0700073242188,0.0,3,True,False,False
+Nasdaq 100,QQQ,core,ma5_52w_near5,2026-06-08,716.0700073242188,0.6,3,True,False,True
+Nasdaq 100,QQQ,core,ma4_52w_near5,2026-06-08,716.0700073242188,0.75,3,True,False,True
+Nasdaq 100,QQQ,core,ma5_stack_hard,2026-06-08,716.0700073242188,0.6,3,True,False,False
+Nasdaq 100,QQQ,core,ma4_stack_hard,2026-06-08,716.0700073242188,0.75,3,True,False,False
+Nasdaq 100,QQQ,core,ma5_stack_half,2026-06-08,716.0700073242188,0.6,3,True,False,False
+Nasdaq 100,QQQ,core,ma4_stack_half,2026-06-08,716.0700073242188,0.75,3,True,False,False
+US Small Cap,IWM,core,ma5,2026-06-08,284.1099853515625,0.6,3,True,False,False
+US Small Cap,IWM,core,ma4,2026-06-08,284.1099853515625,0.75,3,True,False,False
+US Small Cap,IWM,core,ma5_52w_high,2026-06-08,284.1099853515625,0.0,3,True,False,False
+US Small Cap,IWM,core,ma4_52w_high,2026-06-08,284.1099853515625,0.0,3,True,False,False
+US Small Cap,IWM,core,ma5_52w_near5,2026-06-08,284.1099853515625,0.6,3,True,False,True
+US Small Cap,IWM,core,ma4_52w_near5,2026-06-08,284.1099853515625,0.75,3,True,False,True
+US Small Cap,IWM,core,ma5_stack_hard,2026-06-08,284.1099853515625,0.6,3,True,False,False
+US Small Cap,IWM,core,ma4_stack_hard,2026-06-08,284.1099853515625,0.75,3,True,False,False
+US Small Cap,IWM,core,ma5_stack_half,2026-06-08,284.1099853515625,0.6,3,True,False,False
+US Small Cap,IWM,core,ma4_stack_half,2026-06-08,284.1099853515625,0.75,3,True,False,False
+Developed ex-US,EFA,core,ma5,2026-06-08,102.87999725341797,0.6,3,True,False,False
+Developed ex-US,EFA,core,ma4,2026-06-08,102.87999725341797,0.75,3,True,False,False
+Developed ex-US,EFA,core,ma5_52w_high,2026-06-08,102.87999725341797,0.0,3,True,False,False
+Developed ex-US,EFA,core,ma4_52w_high,2026-06-08,102.87999725341797,0.0,3,True,False,False
+Developed ex-US,EFA,core,ma5_52w_near5,2026-06-08,102.87999725341797,0.6,3,True,False,True
+Developed ex-US,EFA,core,ma4_52w_near5,2026-06-08,102.87999725341797,0.75,3,True,False,True
+Developed ex-US,EFA,core,ma5_stack_hard,2026-06-08,102.87999725341797,0.6,3,True,False,False
+Developed ex-US,EFA,core,ma4_stack_hard,2026-06-08,102.87999725341797,0.75,3,True,False,False
+Developed ex-US,EFA,core,ma5_stack_half,2026-06-08,102.87999725341797,0.6,3,True,False,False
+Developed ex-US,EFA,core,ma4_stack_half,2026-06-08,102.87999725341797,0.75,3,True,False,False
+Emerging Markets,EEM,core,ma5,2026-06-08,65.75,0.6,3,True,False,False
+Emerging Markets,EEM,core,ma4,2026-06-08,65.75,0.75,3,True,False,False
+Emerging Markets,EEM,core,ma5_52w_high,2026-06-08,65.75,0.0,3,True,False,False
+Emerging Markets,EEM,core,ma4_52w_high,2026-06-08,65.75,0.0,3,True,False,False
+Emerging Markets,EEM,core,ma5_52w_near5,2026-06-08,65.75,0.0,3,True,False,False
+Emerging Markets,EEM,core,ma4_52w_near5,2026-06-08,65.75,0.0,3,True,False,False
+Emerging Markets,EEM,core,ma5_stack_hard,2026-06-08,65.75,0.6,3,True,False,False
+Emerging Markets,EEM,core,ma4_stack_hard,2026-06-08,65.75,0.75,3,True,False,False
+Emerging Markets,EEM,core,ma5_stack_half,2026-06-08,65.75,0.6,3,True,False,False
+Emerging Markets,EEM,core,ma4_stack_half,2026-06-08,65.75,0.75,3,True,False,False
+Long Treasury,TLT,core,ma5,2026-06-08,84.62000274658203,0.2,1,False,False,False
+Long Treasury,TLT,core,ma4,2026-06-08,84.62000274658203,0.25,1,False,False,False
+Long Treasury,TLT,core,ma5_52w_high,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma4_52w_high,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma5_52w_near5,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma4_52w_near5,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma5_stack_hard,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma4_stack_hard,2026-06-08,84.62000274658203,0.0,1,False,False,False
+Long Treasury,TLT,core,ma5_stack_half,2026-06-08,84.62000274658203,0.1,1,False,False,False
+Long Treasury,TLT,core,ma4_stack_half,2026-06-08,84.62000274658203,0.125,1,False,False,False
+Intermediate Treasury,IEF,core,ma5,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma4,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma5_52w_high,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma4_52w_high,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma5_52w_near5,2026-06-08,93.5199966430664,0.0,0,False,False,True
+Intermediate Treasury,IEF,core,ma4_52w_near5,2026-06-08,93.5199966430664,0.0,0,False,False,True
+Intermediate Treasury,IEF,core,ma5_stack_hard,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma4_stack_hard,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma5_stack_half,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Intermediate Treasury,IEF,core,ma4_stack_half,2026-06-08,93.5199966430664,0.0,0,False,False,False
+Short Treasury,SHY,core,ma5,2026-06-08,81.9000015258789,0.4,2,True,False,False
+Short Treasury,SHY,core,ma4,2026-06-08,81.9000015258789,0.5,2,True,False,False
+Short Treasury,SHY,core,ma5_52w_high,2026-06-08,81.9000015258789,0.0,2,True,False,False
+Short Treasury,SHY,core,ma4_52w_high,2026-06-08,81.9000015258789,0.0,2,True,False,False
+Short Treasury,SHY,core,ma5_52w_near5,2026-06-08,81.9000015258789,0.4,2,True,False,True
+Short Treasury,SHY,core,ma4_52w_near5,2026-06-08,81.9000015258789,0.5,2,True,False,True
+Short Treasury,SHY,core,ma5_stack_hard,2026-06-08,81.9000015258789,0.4,2,True,False,False
+Short Treasury,SHY,core,ma4_stack_hard,2026-06-08,81.9000015258789,0.5,2,True,False,False
+Short Treasury,SHY,core,ma5_stack_half,2026-06-08,81.9000015258789,0.4,2,True,False,False
+Short Treasury,SHY,core,ma4_stack_half,2026-06-08,81.9000015258789,0.5,2,True,False,False
+Gold,GLD,core,ma5,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma4,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma5_52w_high,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma4_52w_high,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma5_52w_near5,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma4_52w_near5,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma5_stack_hard,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma4_stack_hard,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma5_stack_half,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Gold,GLD,core,ma4_stack_half,2026-06-08,397.2699890136719,0.0,0,False,False,False
+Commodities,DBC,core,ma5,2026-06-08,29.469999313354492,0.4,2,False,False,False
+Commodities,DBC,core,ma4,2026-06-08,29.469999313354492,0.5,2,True,False,False
+Commodities,DBC,core,ma5_52w_high,2026-06-08,29.469999313354492,0.0,2,False,False,False
+Commodities,DBC,core,ma4_52w_high,2026-06-08,29.469999313354492,0.0,2,True,False,False
+Commodities,DBC,core,ma5_52w_near5,2026-06-08,29.469999313354492,0.0,2,False,False,False
+Commodities,DBC,core,ma4_52w_near5,2026-06-08,29.469999313354492,0.0,2,True,False,False
+Commodities,DBC,core,ma5_stack_hard,2026-06-08,29.469999313354492,0.0,2,False,False,False
+Commodities,DBC,core,ma4_stack_hard,2026-06-08,29.469999313354492,0.5,2,True,False,False
+Commodities,DBC,core,ma5_stack_half,2026-06-08,29.469999313354492,0.2,2,False,False,False
+Commodities,DBC,core,ma4_stack_half,2026-06-08,29.469999313354492,0.5,2,True,False,False
+US REIT,VNQ,core,ma5,2026-06-08,95.47000122070312,0.6,3,False,False,False
+US REIT,VNQ,core,ma4,2026-06-08,95.47000122070312,0.75,3,True,False,False
+US REIT,VNQ,core,ma5_52w_high,2026-06-08,95.47000122070312,0.0,3,False,False,False
+US REIT,VNQ,core,ma4_52w_high,2026-06-08,95.47000122070312,0.0,3,True,False,False
+US REIT,VNQ,core,ma5_52w_near5,2026-06-08,95.47000122070312,0.6,3,False,False,True
+US REIT,VNQ,core,ma4_52w_near5,2026-06-08,95.47000122070312,0.75,3,True,False,True
+US REIT,VNQ,core,ma5_stack_hard,2026-06-08,95.47000122070312,0.0,3,False,False,False
+US REIT,VNQ,core,ma4_stack_hard,2026-06-08,95.47000122070312,0.75,3,True,False,False
+US REIT,VNQ,core,ma5_stack_half,2026-06-08,95.47000122070312,0.3,3,False,False,False
+US REIT,VNQ,core,ma4_stack_half,2026-06-08,95.47000122070312,0.75,3,True,False,False
+Bitcoin,BTC-USD,core,ma5,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma4,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma5_52w_high,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma4_52w_high,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma5_52w_near5,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma4_52w_near5,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma5_stack_hard,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma4_stack_hard,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma5_stack_half,2026-06-09,62637.890625,0.0,0,False,False,False
+Bitcoin,BTC-USD,core,ma4_stack_half,2026-06-09,62637.890625,0.0,0,False,False,False
+KOSPI200 ETF,069500.KS,korea,ma5,2026-06-09,130130.0,0.8,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma4,2026-06-09,130130.0,1.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma5_52w_high,2026-06-09,130130.0,0.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma4_52w_high,2026-06-09,130130.0,0.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma5_52w_near5,2026-06-09,130130.0,0.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma4_52w_near5,2026-06-09,130130.0,0.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma5_stack_hard,2026-06-09,130130.0,0.8,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma4_stack_hard,2026-06-09,130130.0,1.0,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma5_stack_half,2026-06-09,130130.0,0.8,4,True,False,False
+KOSPI200 ETF,069500.KS,korea,ma4_stack_half,2026-06-09,130130.0,1.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma5,2026-06-09,1293.4000244140625,0.8,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma4,2026-06-09,1293.4000244140625,1.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma5_52w_high,2026-06-09,1293.4000244140625,0.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma4_52w_high,2026-06-09,1293.4000244140625,0.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma5_52w_near5,2026-06-09,1293.4000244140625,0.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma4_52w_near5,2026-06-09,1293.4000244140625,0.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma5_stack_hard,2026-06-09,1293.4000244140625,0.8,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma4_stack_hard,2026-06-09,1293.4000244140625,1.0,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma5_stack_half,2026-06-09,1293.4000244140625,0.8,4,True,False,False
+KOSPI200 Index,^KS200,korea,ma4_stack_half,2026-06-09,1293.4000244140625,1.0,4,True,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma5,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma4,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma5_52w_high,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma4_52w_high,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma5_52w_near5,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma4_52w_near5,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma5_stack_hard,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma4_stack_hard,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma5_stack_half,2026-06-09,16760.0,0.0,0,False,False,False
+KOSDAQ150 ETF,229200.KS,korea,ma4_stack_half,2026-06-09,16760.0,0.0,0,False,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma5,2026-06-09,198335.0,0.8,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma4,2026-06-09,198335.0,1.0,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma5_52w_high,2026-06-09,198335.0,0.0,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma4_52w_high,2026-06-09,198335.0,0.0,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma5_52w_near5,2026-06-09,198335.0,0.8,4,True,False,True
+Korea Nasdaq100 ETF,133690.KS,korea,ma4_52w_near5,2026-06-09,198335.0,1.0,4,True,False,True
+Korea Nasdaq100 ETF,133690.KS,korea,ma5_stack_hard,2026-06-09,198335.0,0.8,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma4_stack_hard,2026-06-09,198335.0,1.0,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma5_stack_half,2026-06-09,198335.0,0.8,4,True,False,False
+Korea Nasdaq100 ETF,133690.KS,korea,ma4_stack_half,2026-06-09,198335.0,1.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma5,2026-06-09,322000.0,0.8,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma4,2026-06-09,322000.0,1.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma5_52w_high,2026-06-09,322000.0,0.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma4_52w_high,2026-06-09,322000.0,0.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma5_52w_near5,2026-06-09,322000.0,0.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma4_52w_near5,2026-06-09,322000.0,0.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma5_stack_hard,2026-06-09,322000.0,0.8,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma4_stack_hard,2026-06-09,322000.0,1.0,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma5_stack_half,2026-06-09,322000.0,0.8,4,True,False,False
+Samsung Electronics,005930.KS,korea,ma4_stack_half,2026-06-09,322000.0,1.0,4,True,False,False
+SK Hynix,000660.KS,korea,ma5,2026-06-09,2215000.0,1.0,5,True,False,False
+SK Hynix,000660.KS,korea,ma4,2026-06-09,2215000.0,1.0,4,True,False,False
+SK Hynix,000660.KS,korea,ma5_52w_high,2026-06-09,2215000.0,0.0,5,True,False,False
+SK Hynix,000660.KS,korea,ma4_52w_high,2026-06-09,2215000.0,0.0,4,True,False,False
+SK Hynix,000660.KS,korea,ma5_52w_near5,2026-06-09,2215000.0,0.0,5,True,False,False
+SK Hynix,000660.KS,korea,ma4_52w_near5,2026-06-09,2215000.0,0.0,4,True,False,False
+SK Hynix,000660.KS,korea,ma5_stack_hard,2026-06-09,2215000.0,1.0,5,True,False,False
+SK Hynix,000660.KS,korea,ma4_stack_hard,2026-06-09,2215000.0,1.0,4,True,False,False
+SK Hynix,000660.KS,korea,ma5_stack_half,2026-06-09,2215000.0,1.0,5,True,False,False
+SK Hynix,000660.KS,korea,ma4_stack_half,2026-06-09,2215000.0,1.0,4,True,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma5,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma4,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma5_52w_high,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma4_52w_high,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma5_52w_near5,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma4_52w_near5,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma5_stack_hard,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma4_stack_hard,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma5_stack_half,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 10Y Bond ETF,148070.KS,korea,ma4_stack_half,2026-06-09,103925.0,0.0,0,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma5,2026-06-09,10110.0,0.8,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma4,2026-06-09,10110.0,1.0,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma5_52w_high,2026-06-09,10110.0,0.0,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma4_52w_high,2026-06-09,10110.0,0.0,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma5_52w_near5,2026-06-09,10110.0,0.8,4,False,False,True
+Korea 30Y Bond ETF,476760.KS,korea,ma4_52w_near5,2026-06-09,10110.0,1.0,4,False,False,True
+Korea 30Y Bond ETF,476760.KS,korea,ma5_stack_hard,2026-06-09,10110.0,0.0,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma4_stack_hard,2026-06-09,10110.0,0.0,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma5_stack_half,2026-06-09,10110.0,0.4,4,False,False,False
+Korea 30Y Bond ETF,476760.KS,korea,ma4_stack_half,2026-06-09,10110.0,0.5,4,False,False,False
+Korea Gold ETF,411060.KS,korea,ma5,2026-06-09,29220.0,0.2,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma4,2026-06-09,29220.0,0.25,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma5_52w_high,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma4_52w_high,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma5_52w_near5,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma4_52w_near5,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma5_stack_hard,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma4_stack_hard,2026-06-09,29220.0,0.0,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma5_stack_half,2026-06-09,29220.0,0.1,1,False,False,False
+Korea Gold ETF,411060.KS,korea,ma4_stack_half,2026-06-09,29220.0,0.125,1,False,False,False
+USD/KRW,USDKRW=X,korea,ma5,2026-06-09,1523.93994140625,1.0,5,True,False,False
+USD/KRW,USDKRW=X,korea,ma4,2026-06-09,1523.93994140625,1.0,4,True,False,False
+USD/KRW,USDKRW=X,korea,ma5_52w_high,2026-06-09,1523.93994140625,0.0,5,True,False,False
+USD/KRW,USDKRW=X,korea,ma4_52w_high,2026-06-09,1523.93994140625,0.0,4,True,False,False
+USD/KRW,USDKRW=X,korea,ma5_52w_near5,2026-06-09,1523.93994140625,1.0,5,True,False,True
+USD/KRW,USDKRW=X,korea,ma4_52w_near5,2026-06-09,1523.93994140625,1.0,4,True,False,True
+USD/KRW,USDKRW=X,korea,ma5_stack_hard,2026-06-09,1523.93994140625,1.0,5,True,False,False
+USD/KRW,USDKRW=X,korea,ma4_stack_hard,2026-06-09,1523.93994140625,1.0,4,True,False,False
+USD/KRW,USDKRW=X,korea,ma5_stack_half,2026-06-09,1523.93994140625,1.0,5,True,False,False
+USD/KRW,USDKRW=X,korea,ma4_stack_half,2026-06-09,1523.93994140625,1.0,4,True,False,False
+Technology,XLK,extended,ma5,2026-06-08,184.17999267578125,0.8,4,True,False,False
+Technology,XLK,extended,ma4,2026-06-08,184.17999267578125,1.0,4,True,False,False
+Technology,XLK,extended,ma5_52w_high,2026-06-08,184.17999267578125,0.0,4,True,False,False
+Technology,XLK,extended,ma4_52w_high,2026-06-08,184.17999267578125,0.0,4,True,False,False
+Technology,XLK,extended,ma5_52w_near5,2026-06-08,184.17999267578125,0.0,4,True,False,False
+Technology,XLK,extended,ma4_52w_near5,2026-06-08,184.17999267578125,0.0,4,True,False,False
+Technology,XLK,extended,ma5_stack_hard,2026-06-08,184.17999267578125,0.8,4,True,False,False
+Technology,XLK,extended,ma4_stack_hard,2026-06-08,184.17999267578125,1.0,4,True,False,False
+Technology,XLK,extended,ma5_stack_half,2026-06-08,184.17999267578125,0.8,4,True,False,False
+Technology,XLK,extended,ma4_stack_half,2026-06-08,184.17999267578125,1.0,4,True,False,False
+Financials,XLF,extended,ma5,2026-06-08,51.970001220703125,0.6,3,False,False,False
+Financials,XLF,extended,ma4,2026-06-08,51.970001220703125,0.5,2,False,False,False
+Financials,XLF,extended,ma5_52w_high,2026-06-08,51.970001220703125,0.0,3,False,False,False
+Financials,XLF,extended,ma4_52w_high,2026-06-08,51.970001220703125,0.0,2,False,False,False
+Financials,XLF,extended,ma5_52w_near5,2026-06-08,51.970001220703125,0.0,3,False,False,False
+Financials,XLF,extended,ma4_52w_near5,2026-06-08,51.970001220703125,0.0,2,False,False,False
+Financials,XLF,extended,ma5_stack_hard,2026-06-08,51.970001220703125,0.0,3,False,False,False
+Financials,XLF,extended,ma4_stack_hard,2026-06-08,51.970001220703125,0.0,2,False,False,False
+Financials,XLF,extended,ma5_stack_half,2026-06-08,51.970001220703125,0.3,3,False,False,False
+Financials,XLF,extended,ma4_stack_half,2026-06-08,51.970001220703125,0.25,2,False,False,False
+Energy,XLE,extended,ma5,2026-06-08,58.33000183105469,0.8,4,False,False,False
+Energy,XLE,extended,ma4,2026-06-08,58.33000183105469,0.75,3,True,False,False
+Energy,XLE,extended,ma5_52w_high,2026-06-08,58.33000183105469,0.0,4,False,False,False
+Energy,XLE,extended,ma4_52w_high,2026-06-08,58.33000183105469,0.0,3,True,False,False
+Energy,XLE,extended,ma5_52w_near5,2026-06-08,58.33000183105469,0.0,4,False,False,False
+Energy,XLE,extended,ma4_52w_near5,2026-06-08,58.33000183105469,0.0,3,True,False,False
+Energy,XLE,extended,ma5_stack_hard,2026-06-08,58.33000183105469,0.0,4,False,False,False
+Energy,XLE,extended,ma4_stack_hard,2026-06-08,58.33000183105469,0.75,3,True,False,False
+Energy,XLE,extended,ma5_stack_half,2026-06-08,58.33000183105469,0.4,4,False,False,False
+Energy,XLE,extended,ma4_stack_half,2026-06-08,58.33000183105469,0.75,3,True,False,False
+Health Care,XLV,extended,ma5,2026-06-08,152.64999389648438,1.0,5,False,False,False
+Health Care,XLV,extended,ma4,2026-06-08,152.64999389648438,1.0,4,False,False,False
+Health Care,XLV,extended,ma5_52w_high,2026-06-08,152.64999389648438,0.0,5,False,False,False
+Health Care,XLV,extended,ma4_52w_high,2026-06-08,152.64999389648438,0.0,4,False,False,False
+Health Care,XLV,extended,ma5_52w_near5,2026-06-08,152.64999389648438,1.0,5,False,False,True
+Health Care,XLV,extended,ma4_52w_near5,2026-06-08,152.64999389648438,1.0,4,False,False,True
+Health Care,XLV,extended,ma5_stack_hard,2026-06-08,152.64999389648438,0.0,5,False,False,False
+Health Care,XLV,extended,ma4_stack_hard,2026-06-08,152.64999389648438,0.0,4,False,False,False
+Health Care,XLV,extended,ma5_stack_half,2026-06-08,152.64999389648438,0.5,5,False,False,False
+Health Care,XLV,extended,ma4_stack_half,2026-06-08,152.64999389648438,0.5,4,False,False,False
+Industrials,XLI,extended,ma5,2026-06-08,173.6300048828125,0.8,4,True,False,False
+Industrials,XLI,extended,ma4,2026-06-08,173.6300048828125,1.0,4,True,False,False
+Industrials,XLI,extended,ma5_52w_high,2026-06-08,173.6300048828125,0.0,4,True,False,False
+Industrials,XLI,extended,ma4_52w_high,2026-06-08,173.6300048828125,0.0,4,True,False,False
+Industrials,XLI,extended,ma5_52w_near5,2026-06-08,173.6300048828125,0.8,4,True,False,True
+Industrials,XLI,extended,ma4_52w_near5,2026-06-08,173.6300048828125,1.0,4,True,False,True
+Industrials,XLI,extended,ma5_stack_hard,2026-06-08,173.6300048828125,0.8,4,True,False,False
+Industrials,XLI,extended,ma4_stack_hard,2026-06-08,173.6300048828125,1.0,4,True,False,False
+Industrials,XLI,extended,ma5_stack_half,2026-06-08,173.6300048828125,0.8,4,True,False,False
+Industrials,XLI,extended,ma4_stack_half,2026-06-08,173.6300048828125,1.0,4,True,False,False
+Consumer Staples,XLP,extended,ma5,2026-06-08,83.06999969482422,0.8,4,False,False,False
+Consumer Staples,XLP,extended,ma4,2026-06-08,83.06999969482422,0.75,3,True,False,False
+Consumer Staples,XLP,extended,ma5_52w_high,2026-06-08,83.06999969482422,0.0,4,False,False,False
+Consumer Staples,XLP,extended,ma4_52w_high,2026-06-08,83.06999969482422,0.0,3,True,False,False
+Consumer Staples,XLP,extended,ma5_52w_near5,2026-06-08,83.06999969482422,0.0,4,False,False,False
+Consumer Staples,XLP,extended,ma4_52w_near5,2026-06-08,83.06999969482422,0.0,3,True,False,False
+Consumer Staples,XLP,extended,ma5_stack_hard,2026-06-08,83.06999969482422,0.0,4,False,False,False
+Consumer Staples,XLP,extended,ma4_stack_hard,2026-06-08,83.06999969482422,0.75,3,True,False,False
+Consumer Staples,XLP,extended,ma5_stack_half,2026-06-08,83.06999969482422,0.4,4,False,False,False
+Consumer Staples,XLP,extended,ma4_stack_half,2026-06-08,83.06999969482422,0.75,3,True,False,False
+Consumer Discretionary,XLY,extended,ma5,2026-06-08,115.38999938964844,0.2,1,False,False,False
+Consumer Discretionary,XLY,extended,ma4,2026-06-08,115.38999938964844,0.25,1,False,False,False
+Consumer Discretionary,XLY,extended,ma5_52w_high,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma4_52w_high,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma5_52w_near5,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma4_52w_near5,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma5_stack_hard,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma4_stack_hard,2026-06-08,115.38999938964844,0.0,1,False,False,False
+Consumer Discretionary,XLY,extended,ma5_stack_half,2026-06-08,115.38999938964844,0.1,1,False,False,False
+Consumer Discretionary,XLY,extended,ma4_stack_half,2026-06-08,115.38999938964844,0.125,1,False,False,False
+Utilities,XLU,extended,ma5,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma4,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma5_52w_high,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma4_52w_high,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma5_52w_near5,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma4_52w_near5,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma5_stack_hard,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma4_stack_hard,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma5_stack_half,2026-06-08,43.52000045776367,0.0,0,False,False,False
+Utilities,XLU,extended,ma4_stack_half,2026-06-08,43.52000045776367,0.0,0,False,False,False
+US Value,VTV,extended,ma5,2026-06-08,212.55999755859375,1.0,5,True,False,False
+US Value,VTV,extended,ma4,2026-06-08,212.55999755859375,1.0,4,True,False,False
+US Value,VTV,extended,ma5_52w_high,2026-06-08,212.55999755859375,0.0,5,True,False,False
+US Value,VTV,extended,ma4_52w_high,2026-06-08,212.55999755859375,0.0,4,True,False,False
+US Value,VTV,extended,ma5_52w_near5,2026-06-08,212.55999755859375,1.0,5,True,False,True
+US Value,VTV,extended,ma4_52w_near5,2026-06-08,212.55999755859375,1.0,4,True,False,True
+US Value,VTV,extended,ma5_stack_hard,2026-06-08,212.55999755859375,1.0,5,True,False,False
+US Value,VTV,extended,ma4_stack_hard,2026-06-08,212.55999755859375,1.0,4,True,False,False
+US Value,VTV,extended,ma5_stack_half,2026-06-08,212.55999755859375,1.0,5,True,False,False
+US Value,VTV,extended,ma4_stack_half,2026-06-08,212.55999755859375,1.0,4,True,False,False
+US Growth,VUG,extended,ma5,2026-06-08,86.20999908447266,0.6,3,True,False,False
+US Growth,VUG,extended,ma4,2026-06-08,86.20999908447266,0.75,3,True,False,False
+US Growth,VUG,extended,ma5_52w_high,2026-06-08,86.20999908447266,0.0,3,True,False,False
+US Growth,VUG,extended,ma4_52w_high,2026-06-08,86.20999908447266,0.0,3,True,False,False
+US Growth,VUG,extended,ma5_52w_near5,2026-06-08,86.20999908447266,0.6,3,True,False,True
+US Growth,VUG,extended,ma4_52w_near5,2026-06-08,86.20999908447266,0.75,3,True,False,True
+US Growth,VUG,extended,ma5_stack_hard,2026-06-08,86.20999908447266,0.6,3,True,False,False
+US Growth,VUG,extended,ma4_stack_hard,2026-06-08,86.20999908447266,0.75,3,True,False,False
+US Growth,VUG,extended,ma5_stack_half,2026-06-08,86.20999908447266,0.6,3,True,False,False
+US Growth,VUG,extended,ma4_stack_half,2026-06-08,86.20999908447266,0.75,3,True,False,False
+Momentum,MTUM,extended,ma5,2026-06-08,315.0799865722656,0.8,4,True,False,False
+Momentum,MTUM,extended,ma4,2026-06-08,315.0799865722656,1.0,4,True,False,False
+Momentum,MTUM,extended,ma5_52w_high,2026-06-08,315.0799865722656,0.0,4,True,False,False
+Momentum,MTUM,extended,ma4_52w_high,2026-06-08,315.0799865722656,0.0,4,True,False,False
+Momentum,MTUM,extended,ma5_52w_near5,2026-06-08,315.0799865722656,0.8,4,True,False,True
+Momentum,MTUM,extended,ma4_52w_near5,2026-06-08,315.0799865722656,1.0,4,True,False,True
+Momentum,MTUM,extended,ma5_stack_hard,2026-06-08,315.0799865722656,0.8,4,True,False,False
+Momentum,MTUM,extended,ma4_stack_hard,2026-06-08,315.0799865722656,1.0,4,True,False,False
+Momentum,MTUM,extended,ma5_stack_half,2026-06-08,315.0799865722656,0.8,4,True,False,False
+Momentum,MTUM,extended,ma4_stack_half,2026-06-08,315.0799865722656,1.0,4,True,False,False
+Quality,QUAL,extended,ma5,2026-06-08,213.8300018310547,0.8,4,True,False,False
+Quality,QUAL,extended,ma4,2026-06-08,213.8300018310547,1.0,4,True,False,False
+Quality,QUAL,extended,ma5_52w_high,2026-06-08,213.8300018310547,0.0,4,True,False,False
+Quality,QUAL,extended,ma4_52w_high,2026-06-08,213.8300018310547,0.0,4,True,False,False
+Quality,QUAL,extended,ma5_52w_near5,2026-06-08,213.8300018310547,0.8,4,True,False,True
+Quality,QUAL,extended,ma4_52w_near5,2026-06-08,213.8300018310547,1.0,4,True,False,True
+Quality,QUAL,extended,ma5_stack_hard,2026-06-08,213.8300018310547,0.8,4,True,False,False
+Quality,QUAL,extended,ma4_stack_hard,2026-06-08,213.8300018310547,1.0,4,True,False,False
+Quality,QUAL,extended,ma5_stack_half,2026-06-08,213.8300018310547,0.8,4,True,False,False
+Quality,QUAL,extended,ma4_stack_half,2026-06-08,213.8300018310547,1.0,4,True,False,False
+Min Volatility,USMV,extended,ma5,2026-06-08,95.2300033569336,0.6,3,False,False,False
+Min Volatility,USMV,extended,ma4,2026-06-08,95.2300033569336,0.75,3,False,False,False
+Min Volatility,USMV,extended,ma5_52w_high,2026-06-08,95.2300033569336,0.0,3,False,False,False
+Min Volatility,USMV,extended,ma4_52w_high,2026-06-08,95.2300033569336,0.0,3,False,False,False
+Min Volatility,USMV,extended,ma5_52w_near5,2026-06-08,95.2300033569336,0.6,3,False,False,True
+Min Volatility,USMV,extended,ma4_52w_near5,2026-06-08,95.2300033569336,0.75,3,False,False,True
+Min Volatility,USMV,extended,ma5_stack_hard,2026-06-08,95.2300033569336,0.0,3,False,False,False
+Min Volatility,USMV,extended,ma4_stack_hard,2026-06-08,95.2300033569336,0.0,3,False,False,False
+Min Volatility,USMV,extended,ma5_stack_half,2026-06-08,95.2300033569336,0.3,3,False,False,False
+Min Volatility,USMV,extended,ma4_stack_half,2026-06-08,95.2300033569336,0.375,3,False,False,False
+Japan,EWJ,extended,ma5,2026-06-08,91.94999694824219,0.6,3,True,False,False
+Japan,EWJ,extended,ma4,2026-06-08,91.94999694824219,0.75,3,True,False,False
+Japan,EWJ,extended,ma5_52w_high,2026-06-08,91.94999694824219,0.0,3,True,False,False
+Japan,EWJ,extended,ma4_52w_high,2026-06-08,91.94999694824219,0.0,3,True,False,False
+Japan,EWJ,extended,ma5_52w_near5,2026-06-08,91.94999694824219,0.6,3,True,False,True
+Japan,EWJ,extended,ma4_52w_near5,2026-06-08,91.94999694824219,0.75,3,True,False,True
+Japan,EWJ,extended,ma5_stack_hard,2026-06-08,91.94999694824219,0.6,3,True,False,False
+Japan,EWJ,extended,ma4_stack_hard,2026-06-08,91.94999694824219,0.75,3,True,False,False
+Japan,EWJ,extended,ma5_stack_half,2026-06-08,91.94999694824219,0.6,3,True,False,False
+Japan,EWJ,extended,ma4_stack_half,2026-06-08,91.94999694824219,0.75,3,True,False,False
+Germany,EWG,extended,ma5,2026-06-08,42.13999938964844,0.4,2,False,False,False
+Germany,EWG,extended,ma4,2026-06-08,42.13999938964844,0.5,2,False,False,False
+Germany,EWG,extended,ma5_52w_high,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma4_52w_high,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma5_52w_near5,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma4_52w_near5,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma5_stack_hard,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma4_stack_hard,2026-06-08,42.13999938964844,0.0,2,False,False,False
+Germany,EWG,extended,ma5_stack_half,2026-06-08,42.13999938964844,0.2,2,False,False,False
+Germany,EWG,extended,ma4_stack_half,2026-06-08,42.13999938964844,0.25,2,False,False,False
+United Kingdom,EWU,extended,ma5,2026-06-08,46.43000030517578,0.4,2,True,False,False
+United Kingdom,EWU,extended,ma4,2026-06-08,46.43000030517578,0.5,2,True,False,False
+United Kingdom,EWU,extended,ma5_52w_high,2026-06-08,46.43000030517578,0.0,2,True,False,False
+United Kingdom,EWU,extended,ma4_52w_high,2026-06-08,46.43000030517578,0.0,2,True,False,False
+United Kingdom,EWU,extended,ma5_52w_near5,2026-06-08,46.43000030517578,0.4,2,True,False,True
+United Kingdom,EWU,extended,ma4_52w_near5,2026-06-08,46.43000030517578,0.5,2,True,False,True
+United Kingdom,EWU,extended,ma5_stack_hard,2026-06-08,46.43000030517578,0.4,2,True,False,False
+United Kingdom,EWU,extended,ma4_stack_hard,2026-06-08,46.43000030517578,0.5,2,True,False,False
+United Kingdom,EWU,extended,ma5_stack_half,2026-06-08,46.43000030517578,0.4,2,True,False,False
+United Kingdom,EWU,extended,ma4_stack_half,2026-06-08,46.43000030517578,0.5,2,True,False,False
+India,INDA,extended,ma5,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma4,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma5_52w_high,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma4_52w_high,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma5_52w_near5,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma4_52w_near5,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma5_stack_hard,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma4_stack_hard,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma5_stack_half,2026-06-08,47.209999084472656,0.0,0,False,False,False
+India,INDA,extended,ma4_stack_half,2026-06-08,47.209999084472656,0.0,0,False,False,False
+China,MCHI,extended,ma5,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma4,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma5_52w_high,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma4_52w_high,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma5_52w_near5,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma4_52w_near5,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma5_stack_hard,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma4_stack_hard,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma5_stack_half,2026-06-08,53.93000030517578,0.0,0,False,False,False
+China,MCHI,extended,ma4_stack_half,2026-06-08,53.93000030517578,0.0,0,False,False,False
+Silver,SLV,extended,ma5,2026-06-08,61.58000183105469,0.2,1,False,False,False
+Silver,SLV,extended,ma4,2026-06-08,61.58000183105469,0.25,1,False,False,False
+Silver,SLV,extended,ma5_52w_high,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma4_52w_high,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma5_52w_near5,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma4_52w_near5,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma5_stack_hard,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma4_stack_hard,2026-06-08,61.58000183105469,0.0,1,False,False,False
+Silver,SLV,extended,ma5_stack_half,2026-06-08,61.58000183105469,0.1,1,False,False,False
+Silver,SLV,extended,ma4_stack_half,2026-06-08,61.58000183105469,0.125,1,False,False,False
+Oil,USO,extended,ma5,2026-06-08,135.14999389648438,0.8,4,False,False,False
+Oil,USO,extended,ma4,2026-06-08,135.14999389648438,0.75,3,True,False,False
+Oil,USO,extended,ma5_52w_high,2026-06-08,135.14999389648438,0.0,4,False,False,False
+Oil,USO,extended,ma4_52w_high,2026-06-08,135.14999389648438,0.0,3,True,False,False
+Oil,USO,extended,ma5_52w_near5,2026-06-08,135.14999389648438,0.0,4,False,False,False
+Oil,USO,extended,ma4_52w_near5,2026-06-08,135.14999389648438,0.0,3,True,False,False
+Oil,USO,extended,ma5_stack_hard,2026-06-08,135.14999389648438,0.0,4,False,False,False
+Oil,USO,extended,ma4_stack_hard,2026-06-08,135.14999389648438,0.75,3,True,False,False
+Oil,USO,extended,ma5_stack_half,2026-06-08,135.14999389648438,0.4,4,False,False,False
+Oil,USO,extended,ma4_stack_half,2026-06-08,135.14999389648438,0.75,3,True,False,False
+Agriculture,DBA,extended,ma5,2026-06-08,26.329999923706055,0.2,1,False,False,False
+Agriculture,DBA,extended,ma4,2026-06-08,26.329999923706055,0.25,1,True,False,False
+Agriculture,DBA,extended,ma5_52w_high,2026-06-08,26.329999923706055,0.0,1,False,False,False
+Agriculture,DBA,extended,ma4_52w_high,2026-06-08,26.329999923706055,0.0,1,True,False,False
+Agriculture,DBA,extended,ma5_52w_near5,2026-06-08,26.329999923706055,0.0,1,False,False,False
+Agriculture,DBA,extended,ma4_52w_near5,2026-06-08,26.329999923706055,0.0,1,True,False,False
+Agriculture,DBA,extended,ma5_stack_hard,2026-06-08,26.329999923706055,0.0,1,False,False,False
+Agriculture,DBA,extended,ma4_stack_hard,2026-06-08,26.329999923706055,0.25,1,True,False,False
+Agriculture,DBA,extended,ma5_stack_half,2026-06-08,26.329999923706055,0.1,1,False,False,False
+Agriculture,DBA,extended,ma4_stack_half,2026-06-08,26.329999923706055,0.25,1,True,False,False

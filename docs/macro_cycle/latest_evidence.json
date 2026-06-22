@@ -1,0 +1,431 @@
+{
+  "generated_at": "2026-06-19 14:04:17",
+  "as_of_requested": "2026-06-19",
+  "fred": {
+    "leading": [
+      {
+        "name": "ISM Manufacturing PMI",
+        "series_id": "TradingEconomics:business-confidence",
+        "status": "ok",
+        "latest_date": "May 2026",
+        "latest": 54.0,
+        "delta_3m": null,
+        "delta_6m": null,
+        "delta_12m": null,
+        "slope_6_obs": null,
+        "slope_12_obs": null,
+        "direction_6m": "rising",
+        "note": "Trading Economics latest/previous snapshot fallback because the public FRED PMI series was unavailable. Source: https://tradingeconomics.com/united-states/business-confidence"
+      },
+      {
+        "name": "University of Michigan Consumer Sentiment",
+        "series_id": "UMCSENT",
+        "status": "ok",
+        "latest_date": "2026-04-01",
+        "latest": 49.8,
+        "delta_3m": -6.600000000000001,
+        "delta_6m": -3.8000000000000043,
+        "delta_12m": -2.4000000000000057,
+        "slope_6_obs": -0.13142857142857048,
+        "slope_12_obs": -0.5136363636363648,
+        "direction_6m": "falling",
+        "note": "Consumer expectations and sentiment, treated as leading pressure."
+      },
+      {
+        "name": "10Y minus 2Y Treasury spread",
+        "series_id": "T10Y2Y",
+        "status": "ok",
+        "latest_date": "2026-06-18",
+        "latest": 0.27,
+        "delta_3m": -0.22999999999999998,
+        "delta_6m": -0.39,
+        "delta_12m": -0.16999999999999998,
+        "slope_6_obs": -0.027714285714285726,
+        "slope_12_obs": -0.009825174825174825,
+        "direction_6m": "falling",
+        "note": "Curve steepening after inversion can mark late slowdown/recession transition."
+      }
+    ],
+    "coincident": [
+      {
+        "name": "Industrial Production Index",
+        "series_id": "INDPRO",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 102.6475,
+        "delta_3m": 0.6981999999999999,
+        "delta_6m": 1.6130999999999887,
+        "delta_12m": 1.681999999999988,
+        "slope_6_obs": 0.27432857142856687,
+        "slope_12_obs": 0.06989650349650221,
+        "direction_6m": "rising",
+        "note": "Use 12-month moving average and YoY direction, not noisy MoM alone."
+      },
+      {
+        "name": "Advance Retail Sales",
+        "series_id": "RSAFS",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 763705.0,
+        "delta_3m": 22427.0,
+        "delta_6m": 28987.0,
+        "delta_12m": 49137.0,
+        "slope_6_obs": 6436.400000000021,
+        "slope_12_obs": 3227.793706293703,
+        "direction_6m": "rising",
+        "note": "Use YoY/12-month trend as annual retail-sales proxy."
+      },
+      {
+        "name": "Capacity Utilization",
+        "series_id": "TCU",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 76.1663,
+        "delta_3m": 0.3193000000000126,
+        "delta_6m": 0.7762000000000029,
+        "delta_12m": 0.2769000000000119,
+        "slope_6_obs": 0.13668571428571435,
+        "slope_12_obs": -0.02885454545454393,
+        "direction_6m": "rising",
+        "note": "Coincident production-cycle pressure."
+      }
+    ],
+    "lagging": [
+      {
+        "name": "Real GDP",
+        "series_id": "GDPC1",
+        "status": "ok",
+        "latest_date": "2026-01-01",
+        "latest": 24152.656,
+        "delta_3m": 96.90699999999924,
+        "delta_6m": 125.82200000000012,
+        "delta_12m": 604.4459999999999,
+        "slope_6_obs": 131.68699999999802,
+        "slope_12_obs": 138.16541258741273,
+        "direction_6m": "rising",
+        "note": "Quarterly GDP, included because annual GDP is too slow for current-cycle reads."
+      },
+      {
+        "name": "Real GDP annual growth",
+        "series_id": "A191RL1A225NBEA",
+        "status": "ok",
+        "latest_date": "2025-01-01",
+        "latest": 2.1,
+        "delta_3m": -0.6999999999999997,
+        "delta_6m": -0.6999999999999997,
+        "delta_12m": -0.6999999999999997,
+        "slope_6_obs": 0.32000000000000006,
+        "slope_12_obs": 0.049999999999999975,
+        "direction_6m": "falling",
+        "note": "Annual GDP growth, slow but useful as a final confirmation."
+      },
+      {
+        "name": "Unemployment Rate",
+        "series_id": "UNRATE",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 4.3,
+        "delta_3m": -0.10000000000000053,
+        "delta_6m": -0.20000000000000018,
+        "delta_12m": 0.0,
+        "slope_6_obs": -0.01714285714285728,
+        "slope_12_obs": 0.0066433566433567745,
+        "direction_6m": "falling",
+        "note": "Low and flat can be late-cycle; rising from lows is slowdown/recession evidence."
+      },
+      {
+        "name": "Average Hourly Earnings",
+        "series_id": "CES0500000003",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 37.53,
+        "delta_3m": 0.259999999999998,
+        "delta_6m": 0.5300000000000011,
+        "delta_12m": 1.25,
+        "slope_6_obs": 0.09742857142856702,
+        "slope_12_obs": 0.10562937062937153,
+        "direction_6m": "rising",
+        "note": "Lagging wage pressure."
+      },
+      {
+        "name": "Average Weekly Hours, Manufacturing",
+        "series_id": "AWHMAN",
+        "status": "ok",
+        "latest_date": "2026-05-01",
+        "latest": 41.6,
+        "delta_3m": 0.0,
+        "delta_6m": 0.30000000000000426,
+        "delta_12m": 0.6000000000000014,
+        "slope_6_obs": 0.08571428571428605,
+        "slope_12_obs": 0.06398601398601744,
+        "direction_6m": "rising",
+        "note": "Labor-cycle deterioration often appears before layoffs fully show."
+      }
+    ]
+  },
+  "price_assets": [
+    {
+      "name": "S&P 500",
+      "ticker": "^GSPC",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "latest": 7500.580078125,
+      "return_3m": 0.13221426736145037,
+      "return_6m": 0.10713594837455309,
+      "return_12m": 0.2540951284948054,
+      "return_5y": 0.8002327464669063,
+      "above_200d_ma": true,
+      "direction_12m": "rising"
+    },
+    {
+      "name": "NASDAQ Composite",
+      "ticker": "^IXIC",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "latest": 26517.9296875,
+      "return_3m": 0.19706694713357975,
+      "return_6m": 0.15263476742503945,
+      "return_12m": 0.3566747171425173,
+      "return_5y": 0.8900364714988938,
+      "above_200d_ma": true,
+      "direction_12m": "rising"
+    },
+    {
+      "name": "Dow Jones Industrial Average",
+      "ticker": "^DJI",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "latest": 51564.69921875,
+      "return_3m": 0.11551181470989724,
+      "return_6m": 0.07534323573597668,
+      "return_12m": 0.22273344297326458,
+      "return_5y": 0.5489509824858665,
+      "above_200d_ma": true,
+      "direction_12m": "rising"
+    },
+    {
+      "name": "Russell 2000",
+      "ticker": "^RUT",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "latest": 2979.77001953125,
+      "return_3m": 0.2021794809539199,
+      "return_6m": 0.188167600510736,
+      "return_12m": 0.41023496640663026,
+      "return_5y": 0.3315920096218299,
+      "above_200d_ma": true,
+      "direction_12m": "rising"
+    }
+  ],
+  "rotation": [
+    {
+      "pair": "DM vs EM",
+      "ticker": "VEA/EEM",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.08369881988215133,
+      "return_6m": -0.11439155478171426,
+      "return_12m": -0.1336848568260779,
+      "direction_6m": "falling",
+      "interpretation": "DM stronger supports recovery/slowdown/recession; EM stronger supports growth."
+    },
+    {
+      "pair": "US vs Non-US",
+      "ticker": "VTI/VEA",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": 0.004993800276167137,
+      "return_6m": -0.05712327614592749,
+      "return_12m": -0.051364745836238734,
+      "direction_6m": "falling",
+      "interpretation": "US stronger supports recovery/slowdown/recession; Non-US stronger supports growth."
+    },
+    {
+      "pair": "NASDAQ vs S&P 500",
+      "ticker": "QQQ/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": 0.09827551299885062,
+      "return_6m": 0.09522169778914669,
+      "return_12m": 0.10994714982574028,
+      "direction_6m": "rising",
+      "interpretation": "NASDAQ stronger supports recovery/growth; weakness supports slowdown."
+    },
+    {
+      "pair": "Dow vs S&P 500",
+      "ticker": "DIA/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.013217093603969388,
+      "return_6m": -0.026750731602351974,
+      "return_12m": -0.020711033575019133,
+      "direction_6m": "falling",
+      "interpretation": "Dow stronger supports slowdown defensiveness."
+    },
+    {
+      "pair": "Growth vs Value",
+      "ticker": "IWF/IWD",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.00493554722735301,
+      "return_6m": -0.09435595538236663,
+      "return_12m": -0.06394262502057224,
+      "direction_6m": "falling",
+      "interpretation": "Growth stronger supports recovery; value/defensive strength supports slowdown."
+    },
+    {
+      "pair": "Mega-cap vs Small-cap",
+      "ticker": "OEF/IWM",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.051477690289551625,
+      "return_6m": -0.08236595668502988,
+      "return_12m": -0.10780131347316113,
+      "direction_6m": "falling",
+      "interpretation": "Mega-cap strength supports recession/defensive concentration."
+    },
+    {
+      "name": "Dollar index",
+      "ticker": "DX-Y.NYB",
+      "status": "ok",
+      "latest_date": "2026-06-19",
+      "latest": 101.03099822998047,
+      "return_3m": 0.01814970081749001,
+      "return_6m": 0.02465517031927167,
+      "return_12m": 0.021443681016499738,
+      "return_5y": 0.09542442321059763,
+      "above_200d_ma": true,
+      "direction_12m": "rising",
+      "pair": "Dollar index",
+      "interpretation": "USD strength supports slowdown/recession; weakness supports growth."
+    }
+  ],
+  "sector_rotation": [
+    {
+      "pair": "Technology vs S&P 500",
+      "ticker": "XLK/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": 0.22414189083557123,
+      "return_6m": 0.218560987949717,
+      "return_12m": 0.2574184731151754,
+      "direction_6m": "rising",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Communication Services vs S&P 500",
+      "ticker": "XLC/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.14885337642902652,
+      "return_6m": -0.15026217515378504,
+      "return_12m": -0.1550895111453794,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Consumer Discretionary vs S&P 500",
+      "ticker": "XLY/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.06453782288083931,
+      "return_6m": -0.13615035902993822,
+      "return_12m": -0.11452145898835508,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Financials vs S&P 500",
+      "ticker": "XLF/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.031207335645243695,
+      "return_6m": -0.10988868658449014,
+      "return_12m": -0.14541111066455326,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Industrials vs S&P 500",
+      "ticker": "XLI/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.032309805663775726,
+      "return_6m": 0.058398448793079094,
+      "return_12m": 0.017193431215515753,
+      "direction_6m": "rising",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Health Care vs S&P 500",
+      "ticker": "XLV/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.10171495527347507,
+      "return_6m": -0.12055884089700153,
+      "return_12m": -0.09956940587716245,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Real Estate vs S&P 500",
+      "ticker": "XLRE/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.07416307327494809,
+      "return_6m": -0.009273182688215198,
+      "return_12m": -0.14419040875479505,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Energy vs S&P 500",
+      "ticker": "XLE/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.183896769914616,
+      "return_6m": 0.11126255230536519,
+      "return_12m": -0.005800325519484506,
+      "direction_6m": "rising",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Materials vs S&P 500",
+      "ticker": "XLB/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.05421878473358788,
+      "return_6m": 0.040453188178582566,
+      "return_12m": -0.04201747788290189,
+      "direction_6m": "rising",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Consumer Staples vs S&P 500",
+      "ticker": "XLP/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.10688990652021879,
+      "return_6m": -0.04197123767307631,
+      "return_12m": -0.16028643351835015,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    },
+    {
+      "pair": "Utilities vs S&P 500",
+      "ticker": "XLU/SPY",
+      "status": "ok",
+      "latest_date": "2026-06-18",
+      "return_3m": -0.15016882275702403,
+      "return_6m": -0.05513319494862179,
+      "return_12m": -0.09833836883691027,
+      "direction_6m": "falling",
+      "interpretation": "Sector relative strength versus broad US equities."
+    }
+  ],
+  "method": {
+    "purpose": "Evidence pack only. GPT-5.5/Codex should make the final cycle judgment.",
+    "no_score_policy": "Do not collapse the evidence into a deterministic score before reasoning.",
+    "portfolio_policy": "Portfolio guidance is a macro overlay/satellite guide, not a replacement for Haenam P rules."
+  }
+}

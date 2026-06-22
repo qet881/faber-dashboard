@@ -1,0 +1,2 @@
+﻿underwater_ratio,current_drawdown,ulcer_index,period_count,recovered_period_count,avg_recovered_days,median_recovered_days,p90_recovered_days,longest_peak,longest_trough,longest_recovery,longest_days,longest_recovered,deepest_peak,deepest_trough,deepest_recovery,deepest_days,deepest_drawdown,deepest_recovered
+0.8854638863705047,-0.0006732908815789695,2.430648807555326,346,345,26.12463768115942,6.0,50.0,2012-10-04,2013-06-25,2014-06-20,624,True,2008-10-08,2008-11-03,2008-11-25,48,-0.10018090045772698,True

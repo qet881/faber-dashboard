@@ -764,9 +764,18 @@ FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL = '해남 A (한국=삼성전자/하이닉
 # 한국 슬롯을 코스피200 패시브(지수 그대로)로 집행하는 변형. 나스닥은 다른 해남 A와 동일하게
 # 액티브 집행이라, 나스닥 액티브 집행 데이터셋(build_faber_nasdaq_active_execution_data)이 곧
 # 이 변형과 동일한 NAV가 된다(한국 슬롯에 별도 오버레이를 얹지 않으면 코스피200 지수 유지).
-FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '해남 A (한국=코스피200 패시브)'
+FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '해남P (-5%룰)'
+FABER_PASSIVE_NASDAQ_KR_PASSIVE_LABEL = '해남 A (한국=코스피200TR, 나스닥=패시브)'
 HAENAM_M_LABEL = '해남M'
+HAENAM_P_LABEL = '해남P'
+HAENAM_P_LOCAL_SIGNAL_LABEL = '해남P (현지통화 신호)'
+HAENAM_P_VIX70_LABEL = '해남P+VIX (70%상한)'
+HAENAM_P_VIX100_LABEL = '해남P+VIX (100%상한)'
 HAENAM_S_LABEL = '해남S'
+HAENAM_V_MOM_LABEL = '해남V (연속모멘텀)'
+HAENAM_V_FABER_LABEL = '해남V (-5%룰)'
+HAENAM_V_PASSIVE_MOM_LABEL = '해남V 패시브 (연속모멘텀)'
+HAENAM_V_PASSIVE_FABER_LABEL = '해남V 패시브 (-5%룰)'
 # 위 5개 해남 A 변형과 한국 슬롯/나스닥(액티브)·나머지 슬롯은 동일하게 두고, 신호(투자 방법)만
 # 연속 모멘텀(simulate_daily_nav_with_attribution, 0.2×12개월 모멘텀 점수)으로 바꾼 비교군.
 MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL = HAENAM_M_LABEL
@@ -775,7 +784,8 @@ MOM_PASSIVE_NASDAQ_KR_SAMSUNG_LABEL = '연속모멘텀 (한국=삼성전자, 신
 MOM_ACTIVE_NASDAQ_KR_SAMSUNG_SELF_SIGNAL_LABEL = '연속모멘텀 (한국=삼성전자, 신호=삼성전자)'
 MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL = '연속모멘텀 (한국=SK하이닉스)'
 MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL = '연속모멘텀 (한국=삼성전자/하이닉스)'
-MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '연속모멘텀 (한국=코스피200 패시브)'
+MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = HAENAM_P_LABEL
+MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL = '연속모멘텀 (한국=코스피200TR, 나스닥=패시브)'
 HAENAM_SAMSUNG_NAME = '삼성전자'
 HAENAM_HYNIX_NAME = 'SK하이닉스'
 HAENAM_TIME_NAME = 'TIME 나스닥100액티브'
@@ -787,6 +797,15 @@ HAENAM_KR_TIME_NAME = 'TIME 코스피액티브'
 HAENAM_KR_KOACT_NAME = 'KoAct 코스피액티브'
 TIME_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2021-05-25')
 KOACT_KOSPI_ACTIVE_LISTING_DATE = pd.Timestamp('2026-05-07')  # 효력발생일 근사(상장 직후, 백테스트 영향 미미)
+TIME_KOREA_VALUEUP_ACTIVE_TICKER = '495060'
+KOACT_KOREA_VALUEUP_ACTIVE_TICKER = '495230'
+KOREA_VALUEUP_INDEX_PROXY_TICKER = '495850'
+KOREA_VALUEUP_TR_PROXY_TICKER = '495550'
+KOREA_VALUEUP_PASSIVE_TICKER = KOREA_VALUEUP_TR_PROXY_TICKER
+KOREA_VALUEUP_ACTIVE_LISTING_DATE = pd.Timestamp('2024-11-04')
+HAENAM_VALUEUP_TIME_NAME = 'TIME 코리아밸류업액티브'
+HAENAM_VALUEUP_KOACT_NAME = 'KoAct 코리아밸류업액티브'
+HAENAM_VALUEUP_PASSIVE_NAME = 'SOL 코리아밸류업TR'
 # 나스닥100 슬롯 실제 집행 상품 전환일 ('이번 달 성과 참고' 표시 전용 — 공식 손익과는 무관).
 # 2026-06-02 TIME/KoAct 나스닥100액티브 50:50로 전환 완료(이전: 패시브 미국나스닥100, 133690).
 #   - 전환 게이트: TIME·KoAct 괴리율이 모두 패시브(133690) 기준선 대비 0.3% 이하인 날 집행(2026-06-02 충족).
@@ -2416,6 +2435,431 @@ def simulate_haenam_m_strategy(start_date, end_date, initial_capital, strategy_d
     return result[0] if result is not None else None
 
 
+def build_haenam_p_strategy_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남P: 한국주식은 코스피200TR 패시브, 나스닥은 TIME/KoAct 액티브 집행, 신호는 연속모멘텀."""
+    return build_faber_nasdaq_active_execution_data(
+        base_all_data, start_date, end_date, price_col=price_col
+    )
+
+
+def _normalize_us_signal_frame(df):
+    if df is None or df.empty or 'Close' not in df.columns:
+        return None
+    df = df[~df.index.duplicated(keep='last')].sort_index()
+    out = pd.DataFrame(index=df.index)
+    out['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+    out['Adj Close'] = (
+        pd.to_numeric(df['Adj Close'], errors='coerce')
+        if 'Adj Close' in df.columns else out['Close']
+    )
+    out = out.dropna(subset=['Close'])
+    return out if not out.empty else None
+
+
+@st.cache_data(ttl=3600)
+def fetch_us_local_currency_signal_data(asset_name, start_date, end_date):
+    """미국 자산 모멘텀을 환율 제외 현지통화 기준으로 계산하기 위한 신호 시리즈."""
+    config = PROXY_ASSETS.get(asset_name)
+    if config is None or config.get('type') != 'us_etf_fx':
+        return None
+
+    ticker = config.get('ticker')
+    etf_signal = _normalize_us_signal_frame(_read_us_market_data(ticker, start_date, end_date))
+
+    if ticker == 'TLT':
+        deep_signal = fetch_deep_proxy_us_bond_fred(start_date, end_date)
+        return _chain_link_series(deep_signal, etf_signal)
+    if ticker == 'GLD':
+        deep_signal = fetch_deep_proxy_gold_fred(start_date, end_date)
+        return _chain_link_series(deep_signal, etf_signal)
+    return etf_signal
+
+
+def build_haenam_p_local_currency_signal_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남P 실행 가격은 유지하고, 미국 자산 신호만 QQQ/TLT/GLD 현지통화 기준으로 교체."""
+    data = build_haenam_p_strategy_data(base_all_data, start_date, end_date, price_col=price_col)
+    if data is None:
+        return None
+
+    for asset_name, config in PROXY_ASSETS.items():
+        if config.get('type') != 'us_etf_fx':
+            continue
+        local_signal = fetch_us_local_currency_signal_data(asset_name, start_date, end_date)
+        if local_signal is not None and not local_signal.empty:
+            data[f"{asset_name}_모멘텀"] = local_signal
+    return data
+
+
+def calculate_haenam_p_weights(as_of_date, strategy_data, price_col="Adj Close"):
+    return calculate_weights_at_date(as_of_date, strategy_data, price_col=price_col)
+
+
+def expand_haenam_p_execution_weights(base_weights, as_of_date):
+    """Expand base signal weights to Haenam P execution assets."""
+    return expand_haenam_execution_weights(
+        base_weights, as_of_date, kr_weights={}, nasdaq_active=True
+    )
+
+
+def simulate_haenam_p_strategy(start_date, end_date, initial_capital, strategy_data, price_col="Adj Close"):
+    result = simulate_daily_nav_with_attribution(
+        start_date, end_date, initial_capital, strategy_data, price_col=price_col
+    )
+    return result[0] if result is not None else None
+
+
+@st.cache_data(ttl=3600)
+def fetch_vix_data(start_date, end_date):
+    """VIX daily close for crisis-overlay research."""
+    return _read_yfinance_history("^VIX", start_date, end_date)
+
+
+def calculate_vix_target_equity(vix_value, max_equity=1.0):
+    """Map VIX to the stock target used by the research overlay."""
+    try:
+        vix = float(vix_value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(vix) or vix < 25:
+        return None
+    if vix < 40:
+        target = 0.40 + ((vix - 25.0) / 15.0) * 0.30
+    elif vix < 80:
+        target = 0.70 + ((vix - 40.0) / 40.0) * 0.30
+    else:
+        target = 1.0
+    return min(float(max_equity), target)
+
+
+def calculate_vix_buy_step(vix_value):
+    try:
+        vix = float(vix_value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not np.isfinite(vix):
+        return 0.0
+    if vix >= 80:
+        return 1.0
+    if vix >= 40:
+        return 0.10
+    if vix >= 25:
+        return 0.01
+    return 0.0
+
+
+def _build_vix_signal_series(vix_data, trading_dates, price_col="Close"):
+    if vix_data is None or vix_data.empty or len(trading_dates) == 0:
+        return pd.Series(index=trading_dates, dtype=float)
+    col = price_col if price_col in vix_data.columns else "Close"
+    if col not in vix_data.columns:
+        return pd.Series(index=trading_dates, dtype=float)
+    vix = pd.to_numeric(vix_data[col], errors="coerce")
+    vix = vix[~vix.index.duplicated(keep="last")].sort_index()
+    # Korean-market execution cannot know the same-date US close, so use the
+    # previous available VIX close.
+    return vix.reindex(trading_dates).ffill().shift(1)
+
+
+def _build_stock_recovery_basket(strategy_data, trading_dates, price_col="Adj Close"):
+    if strategy_data is None or len(trading_dates) == 0:
+        return pd.Series(index=trading_dates, dtype=float)
+    kr = strategy_data.get(KR_STOCK_MIX_ASSET)
+    us = strategy_data.get(NASDAQ100_ASSET_NAME)
+    kr_vals, us_vals = [], []
+    for d in trading_dates:
+        kr_vals.append(get_price_at_date(kr, d, price_col=price_col))
+        us_vals.append(get_price_at_date(us, d, price_col=price_col))
+    kr_s = pd.Series(kr_vals, index=trading_dates, dtype=float).ffill()
+    us_s = pd.Series(us_vals, index=trading_dates, dtype=float).ffill()
+    if kr_s.dropna().empty or us_s.dropna().empty:
+        return pd.Series(index=trading_dates, dtype=float)
+    kr_base = float(kr_s.dropna().iloc[0])
+    us_base = float(us_s.dropna().iloc[0])
+    if kr_base <= 0 or us_base <= 0:
+        return pd.Series(index=trading_dates, dtype=float)
+    return 0.5 * (kr_s / kr_base) + 0.5 * (us_s / us_base)
+
+
+def _apply_vix_equity_target(base_weights, target_equity):
+    if target_equity is None:
+        return dict(base_weights)
+    out = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
+    kr_base = float(base_weights.get(KR_STOCK_MIX_ASSET, 0.0) or 0.0)
+    us_base = float(base_weights.get(NASDAQ100_ASSET_NAME, 0.0) or 0.0)
+    base_stock = kr_base + us_base
+    stock_target = max(base_stock, min(1.0, float(target_equity)))
+    overlay = max(0.0, stock_target - base_stock)
+    out[KR_STOCK_MIX_ASSET] = kr_base + overlay * 0.5
+    out[NASDAQ100_ASSET_NAME] = us_base + overlay * 0.5
+    total_stock = out[KR_STOCK_MIX_ASSET] + out[NASDAQ100_ASSET_NAME]
+    if total_stock > 1.0:
+        out[KR_STOCK_MIX_ASSET] /= total_stock
+        out[NASDAQ100_ASSET_NAME] /= total_stock
+        total_stock = 1.0
+    out[CASH_NAME] = max(0.0, 1.0 - total_stock)
+    return out
+
+
+def simulate_haenam_p_vix_overlay_strategy(
+    start_date,
+    end_date,
+    initial_capital,
+    strategy_data,
+    vix_data,
+    max_equity=1.0,
+    price_col="Adj Close",
+):
+    """HaenamP engine plus a research-only VIX crisis-buying overlay.
+
+    The base HaenamP signal is unchanged. When VIX is active, defensive slots
+    are converted to cash and extra stock exposure is split evenly between the
+    KOSPI200 and Nasdaq execution slots.
+    """
+    if strategy_data is None or vix_data is None or vix_data.empty:
+        return None, None
+    trading_dates = build_trading_calendar(strategy_data, start_date, end_date)
+    if len(trading_dates) == 0:
+        return None, None
+
+    actual_start = trading_dates[0]
+    vix_signal = _build_vix_signal_series(vix_data, trading_dates)
+    stock_basket = _build_stock_recovery_basket(strategy_data, trading_dates, price_col=price_col)
+    base_weights = calculate_haenam_p_weights(actual_start, strategy_data, price_col=price_col)
+    current_vix_target = None
+    target_weights = dict(base_weights)
+    holdings = {k: 0.0 for k in list(ASSETS.keys()) + [CASH_NAME]}
+    current_weights = rebalance_holdings(
+        initial_capital, actual_start, target_weights, holdings, strategy_data, price_col=price_col
+    )
+
+    daily_nav, overlay_rows = [], []
+    monthly_rebalance_dates = [actual_start]
+    last_valid_nav = float(initial_capital)
+    cycle_peak = None
+
+    for i, date in enumerate(trading_dates):
+        portfolio_raw = _calc_portfolio_value(holdings, date, strategy_data, price_col)
+        portfolio_value = _safe_nav_value(portfolio_raw, last_valid_nav)
+        if portfolio_value is None:
+            portfolio_value = last_valid_nav
+        last_valid_nav = portfolio_value
+        daily_nav.append({"date": date, "nav": portfolio_value})
+
+        is_month_end = _is_month_end_rebalance_day(trading_dates, i)
+        if is_month_end and date != actual_start:
+            base_weights = calculate_haenam_p_weights(date, strategy_data, price_col=price_col)
+            monthly_rebalance_dates.append(date)
+
+        basket_value = stock_basket.loc[date] if date in stock_basket.index else np.nan
+        if cycle_peak is not None and np.isfinite(basket_value) and basket_value >= cycle_peak:
+            current_vix_target = None
+            cycle_peak = None
+
+        vix_value = vix_signal.loc[date] if date in vix_signal.index else np.nan
+        desired = calculate_vix_target_equity(vix_value, max_equity=max_equity)
+        if desired is not None:
+            if cycle_peak is None:
+                prior_basket = stock_basket.loc[:date].dropna()
+                cycle_peak = float(prior_basket.max()) if not prior_basket.empty else None
+            step = calculate_vix_buy_step(vix_value)
+            start_target = current_vix_target
+            if start_target is None:
+                start_target = (
+                    float(base_weights.get(KR_STOCK_MIX_ASSET, 0.0) or 0.0)
+                    + float(base_weights.get(NASDAQ100_ASSET_NAME, 0.0) or 0.0)
+                )
+            current_vix_target = min(float(desired), float(start_target) + step)
+
+        if current_vix_target is None:
+            next_target_weights = dict(base_weights)
+        else:
+            next_target_weights = _apply_vix_equity_target(base_weights, current_vix_target)
+
+        should_rebalance = is_month_end or next_target_weights != target_weights
+        if should_rebalance and date != trading_dates[-1]:
+            target_weights = next_target_weights
+            current_weights = rebalance_holdings(
+                portfolio_value, date, target_weights, holdings, strategy_data, price_col=price_col
+            )
+
+        overlay_rows.append(
+            {
+                "date": date,
+                "vix": vix_value,
+                "vix_target_equity": current_vix_target,
+                "stock_weight": (
+                    float(current_weights.get(KR_STOCK_MIX_ASSET, 0.0) or 0.0)
+                    + float(current_weights.get(NASDAQ100_ASSET_NAME, 0.0) or 0.0)
+                ),
+                "cash_weight": float(current_weights.get(CASH_NAME, 0.0) or 0.0),
+                "cycle_active": cycle_peak is not None,
+            }
+        )
+
+    df_nav = pd.DataFrame(daily_nav).set_index("date").sort_index()
+    df_nav["running_max"] = df_nav["nav"].expanding().max()
+    df_nav["drawdown"] = (df_nav["nav"] - df_nav["running_max"]) / df_nav["running_max"]
+    overlay_df = pd.DataFrame(overlay_rows).set_index("date").sort_index()
+    return df_nav, overlay_df
+
+
+def _kr_valueup_active_backtest_targets(date):
+    """해남V 한국주식 슬롯 집행 타깃.
+    코리아밸류업 액티브 2종 상장 전에는 코스피200, 상장 후에는 TIME/KoAct 50:50으로 집행한다.
+    """
+    if pd.Timestamp(date) < KOREA_VALUEUP_ACTIVE_LISTING_DATE:
+        return {"base": 1.0}
+    return {"time_valueup": 0.5, "koact_valueup": 0.5}
+
+
+def fetch_korea_valueup_signal_data(base_slot_df, start_date, end_date):
+    """해남V 한국 슬롯 모멘텀 신호.
+    KRX 코리아밸류업 지수 히스토리를 FDR에서 직접 받기 어려운 환경에서는
+    TR 지수 추종 ETF(495550)를 신호 프록시로 체인링크한다. 상장 전 구간은 코스피200 신호를 유지한다.
+    """
+    signal_df = fetch_etf_data(KOREA_VALUEUP_TR_PROXY_TICKER, start_date, end_date, is_momentum=False)
+    if signal_df is None or signal_df.empty:
+        return base_slot_df
+    return _chain_link_series(base_slot_df, signal_df)
+
+
+def build_haenam_v_kr_valueup_overlay_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남V: 한국주식 슬롯만 코스피200→TIME/KoAct 코리아밸류업액티브로 교체.
+    신호는 상장 전 코스피200, 상장 후 코리아밸류업 지수 프록시를 사용한다.
+    """
+    if base_all_data is None:
+        return None
+    base_slot_df = base_all_data.get(KR_STOCK_MIX_ASSET)
+    if base_slot_df is None or base_slot_df.empty:
+        return None
+
+    time_df = fetch_etf_data(TIME_KOREA_VALUEUP_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    koact_df = fetch_etf_data(KOACT_KOREA_VALUEUP_ACTIVE_TICKER, start_date, end_date, is_momentum=False)
+    trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
+    exec_df = build_weighted_execution_series(
+        {"base": base_slot_df, "time_valueup": time_df, "koact_valueup": koact_df},
+        _kr_valueup_active_backtest_targets,
+        trading_dates,
+        price_col=price_col,
+    )
+    if exec_df is None or exec_df.empty:
+        return None
+
+    data = {k: v for k, v in base_all_data.items()}
+    data[KR_STOCK_MIX_ASSET] = exec_df
+    data[f"{KR_STOCK_MIX_ASSET}_모멘텀"] = fetch_korea_valueup_signal_data(
+        base_slot_df, start_date, end_date
+    )
+    return data
+
+
+def build_haenam_v_strategy_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남V: 나스닥은 기존 해남 액티브 집행, 한국은 코리아밸류업액티브 집행/밸류업 신호."""
+    nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+        base_all_data, start_date, end_date, price_col=price_col
+    )
+    if nasdaq_active_data is None:
+        return None
+    return build_haenam_v_kr_valueup_overlay_data(
+        nasdaq_active_data, start_date, end_date, price_col=price_col
+    )
+
+
+def _kr_valueup_passive_backtest_targets(date):
+    """해남V 패시브 한국주식 슬롯 집행 타깃.
+    코리아밸류업 ETF 상장 전에는 코스피200, 상장 후에는 SOL 코리아밸류업TR로 집행한다.
+    """
+    if pd.Timestamp(date) < KOREA_VALUEUP_ACTIVE_LISTING_DATE:
+        return {"base": 1.0}
+    return {"valueup_tr": 1.0}
+
+
+def build_haenam_v_kr_valueup_passive_overlay_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남V 패시브: 한국주식 슬롯 집행을 SOL 코리아밸류업TR로 교체하고 밸류업 TR 신호를 사용한다."""
+    if base_all_data is None:
+        return None
+    base_slot_df = base_all_data.get(KR_STOCK_MIX_ASSET)
+    if base_slot_df is None or base_slot_df.empty:
+        return None
+
+    valueup_tr_df = fetch_etf_data(KOREA_VALUEUP_PASSIVE_TICKER, start_date, end_date, is_momentum=False)
+    trading_dates = build_trading_calendar(base_all_data, start_date, end_date)
+    exec_df = build_weighted_execution_series(
+        {"base": base_slot_df, "valueup_tr": valueup_tr_df},
+        _kr_valueup_passive_backtest_targets,
+        trading_dates,
+        price_col=price_col,
+    )
+    if exec_df is None or exec_df.empty:
+        return None
+
+    data = {k: v for k, v in base_all_data.items()}
+    data[KR_STOCK_MIX_ASSET] = exec_df
+    data[f"{KR_STOCK_MIX_ASSET}_모멘텀"] = fetch_korea_valueup_signal_data(
+        base_slot_df, start_date, end_date
+    )
+    return data
+
+
+def build_haenam_v_passive_strategy_data(base_all_data, start_date, end_date, price_col="Adj Close"):
+    """해남V 패시브: 나스닥은 기존 해남 액티브 집행, 한국은 SOL 코리아밸류업TR 집행/밸류업 TR 신호."""
+    nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+        base_all_data, start_date, end_date, price_col=price_col
+    )
+    if nasdaq_active_data is None:
+        return None
+    return build_haenam_v_kr_valueup_passive_overlay_data(
+        nasdaq_active_data, start_date, end_date, price_col=price_col
+    )
+
+
+def expand_haenam_v_backtest_weights(base_weights, as_of_date):
+    """Expand base signal weights to the Haenam V active value-up backtest assets."""
+    out = {}
+    for asset, weight in (base_weights or {}).items():
+        w = float(weight or 0.0)
+        if w <= 0:
+            continue
+        if asset == KR_STOCK_MIX_ASSET:
+            targets = _kr_valueup_active_backtest_targets(as_of_date)
+            out[KR_STOCK_MIX_ASSET] = out.get(KR_STOCK_MIX_ASSET, 0.0) + w * targets.get("base", 0.0)
+            out[HAENAM_VALUEUP_TIME_NAME] = out.get(HAENAM_VALUEUP_TIME_NAME, 0.0) + w * targets.get("time_valueup", 0.0)
+            out[HAENAM_VALUEUP_KOACT_NAME] = out.get(HAENAM_VALUEUP_KOACT_NAME, 0.0) + w * targets.get("koact_valueup", 0.0)
+        elif asset == NASDAQ100_ASSET_NAME:
+            targets = _nasdaq_active_execution_targets(as_of_date)
+            out[NASDAQ100_ASSET_NAME] = out.get(NASDAQ100_ASSET_NAME, 0.0) + w * targets.get("base", 0.0)
+            out[HAENAM_TIME_NAME] = out.get(HAENAM_TIME_NAME, 0.0) + w * targets.get("time", 0.0)
+            out[HAENAM_KOACT_NAME] = out.get(HAENAM_KOACT_NAME, 0.0) + w * targets.get("koact", 0.0)
+        else:
+            out[asset] = out.get(asset, 0.0) + w
+    invested = sum(v for k, v in out.items() if k != CASH_NAME)
+    out[CASH_NAME] = max(0.0, 1.0 - invested)
+    return {k: v for k, v in out.items() if v > 0.000001}
+
+
+def expand_haenam_v_passive_backtest_weights(base_weights, as_of_date):
+    """Expand base signal weights to the Haenam V passive value-up backtest assets."""
+    out = {}
+    for asset, weight in (base_weights or {}).items():
+        w = float(weight or 0.0)
+        if w <= 0:
+            continue
+        if asset == KR_STOCK_MIX_ASSET:
+            targets = _kr_valueup_passive_backtest_targets(as_of_date)
+            out[KR_STOCK_MIX_ASSET] = out.get(KR_STOCK_MIX_ASSET, 0.0) + w * targets.get("base", 0.0)
+            out[HAENAM_VALUEUP_PASSIVE_NAME] = out.get(HAENAM_VALUEUP_PASSIVE_NAME, 0.0) + w * targets.get("valueup_tr", 0.0)
+        elif asset == NASDAQ100_ASSET_NAME:
+            targets = _nasdaq_active_execution_targets(as_of_date)
+            out[NASDAQ100_ASSET_NAME] = out.get(NASDAQ100_ASSET_NAME, 0.0) + w * targets.get("base", 0.0)
+            out[HAENAM_TIME_NAME] = out.get(HAENAM_TIME_NAME, 0.0) + w * targets.get("time", 0.0)
+            out[HAENAM_KOACT_NAME] = out.get(HAENAM_KOACT_NAME, 0.0) + w * targets.get("koact", 0.0)
+        else:
+            out[asset] = out.get(asset, 0.0) + w
+    invested = sum(v for k, v in out.items() if k != CASH_NAME)
+    out[CASH_NAME] = max(0.0, 1.0 - invested)
+    return {k: v for k, v in out.items() if v > 0.000001}
+
+
 def _kr_stock_active_backtest_targets(date):
     """백테스트용 한국주식 슬롯 집행 타깃. 코스피액티브 상장 전엔 코스피200(지수),
     TIME 상장 후 TIME 100%, KoAct 상장 후 TIME/KoAct 50:50으로 스플라이스."""
@@ -2555,10 +2999,16 @@ def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col
                 "koact_kospi": (HAENAM_KR_KOACT_NAME, KOACT_KOSPI_ACTIVE_TICKER),
             }
             components = []
-            for kr_key, kr_frac in (kr_weights or _kr_stock_active_execution_targets(as_of_date)).items():
+            selected_kr_weights = (
+                _kr_stock_active_execution_targets(as_of_date)
+                if kr_weights is None else kr_weights
+            )
+            for kr_key, kr_frac in selected_kr_weights.items():
                 if kr_key in kr_component_map and kr_frac > 0:
                     kr_name, kr_ticker = kr_component_map[kr_key]
                     components.append((kr_name, kr_ticker, weight * kr_frac))
+            if not components:
+                components = [(asset, row.get("티커"), weight)]
         elif asset == NASDAQ100_ASSET_NAME and weight > 0:
             targets = _nasdaq_active_execution_targets(as_of_date)
             components = []
@@ -4459,9 +4909,9 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     IC = 10_000_000
 
     st.markdown("---")
-    st.subheader(f"📊 해남S 중심 전략 백테스트 (요청 시작: {bt_start_date.strftime('%Y-%m')})")
+    st.subheader(f"📊 해남P 중심 전략 백테스트 (요청 시작: {bt_start_date.strftime('%Y-%m')})")
 
-    # Faber A 원형은 기준 신호/비교군으로 보존하고, 해남S를 실전 집행 기준으로 둔다.
+    # Faber A 원형은 기준 신호/비교군으로 보존하고, 해남P를 실전 집행 기준으로 둔다.
     if fingerprint_df is not None:
         st.caption(f"Data fingerprint: `{fingerprint}`")
         render_backtest_reproducibility_status(
@@ -4496,9 +4946,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     old_nav, _, _, _ = simulate_daily_nav_with_attribution(
         bt_start_date, current_date, IC, all_data, price_col=price_col)
-    faber_nasdaq_active_data = build_faber_nasdaq_active_execution_data(
+    haenam_p_strategy_data = build_haenam_p_strategy_data(
         all_data, data_start, current_date, price_col=price_col
     )
+    faber_nasdaq_active_data = haenam_p_strategy_data
     faber_nasdaq_active_nav = (
         simulate_faber_strategy(
             bt_start_date, current_date, IC, faber_nasdaq_active_data,
@@ -4548,6 +4999,40 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             mode='A', buffer_df=None, price_col=price_col
         )
         if faber_active_nasdaq_kr_active_data is not None else None
+    )
+    haenam_v_strategy_data = build_haenam_v_strategy_data(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    haenam_v_faber_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, haenam_v_strategy_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if haenam_v_strategy_data is not None else None
+    )
+    haenam_v_mom_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, haenam_v_strategy_data,
+            price_col=price_col
+        )[0]
+        if haenam_v_strategy_data is not None else None
+    )
+    haenam_v_passive_strategy_data = build_haenam_v_passive_strategy_data(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    haenam_v_passive_faber_nav = (
+        simulate_faber_strategy(
+            bt_start_date, current_date, IC, haenam_v_passive_strategy_data,
+            mode='A', buffer_df=None, price_col=price_col
+        )
+        if haenam_v_passive_strategy_data is not None else None
+    )
+    haenam_v_passive_mom_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, haenam_v_passive_strategy_data,
+            price_col=price_col
+        )[0]
+        if haenam_v_passive_strategy_data is not None else None
     )
     old_haenam_nav = (
         simulate_daily_nav_with_attribution(
@@ -4607,11 +5092,36 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         )[0]
         if faber_nasdaq_active_data is not None else None
     )
-    primary_nav_df = mom_kr_samsung_nav if mom_kr_samsung_nav is not None else nav_df
-    primary_strategy_data = haenam_s_strategy_data if mom_kr_samsung_nav is not None else all_data
-    primary_price_data = haenam_price_data if mom_kr_samsung_nav is not None else all_data
-    primary_label = HAENAM_S_LABEL if mom_kr_samsung_nav is not None else "Faber A"
-    primary_is_haenam = primary_label == HAENAM_S_LABEL
+    haenam_p_local_signal_data = build_haenam_p_local_currency_signal_data(
+        all_data, data_start, current_date, price_col=price_col
+    )
+    haenam_p_local_signal_nav = (
+        simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, IC, haenam_p_local_signal_data,
+            price_col=price_col
+        )[0]
+        if haenam_p_local_signal_data is not None else None
+    )
+    vix_data = fetch_vix_data(data_start, current_date)
+    haenam_p_vix70_nav, haenam_p_vix70_overlay = (
+        simulate_haenam_p_vix_overlay_strategy(
+            bt_start_date, current_date, IC, haenam_p_strategy_data, vix_data,
+            max_equity=0.70, price_col=price_col
+        )
+        if haenam_p_strategy_data is not None and vix_data is not None else (None, None)
+    )
+    haenam_p_vix100_nav, haenam_p_vix100_overlay = (
+        simulate_haenam_p_vix_overlay_strategy(
+            bt_start_date, current_date, IC, haenam_p_strategy_data, vix_data,
+            max_equity=1.00, price_col=price_col
+        )
+        if haenam_p_strategy_data is not None and vix_data is not None else (None, None)
+    )
+    primary_nav_df = mom_kr_passive_nav if mom_kr_passive_nav is not None else nav_df
+    primary_strategy_data = haenam_p_strategy_data if mom_kr_passive_nav is not None else all_data
+    primary_price_data = haenam_price_data if mom_kr_passive_nav is not None else all_data
+    primary_label = HAENAM_P_LABEL if mom_kr_passive_nav is not None else "Faber A"
+    primary_is_haenam = primary_label == HAENAM_P_LABEL
     faber_base_label = "Faber A (원형 신호·ETF 집행)"
     old_haenam_label = "이전 전략(연속모멘텀·해남 A 집행)"
     primary_asset_keys = []
@@ -4651,7 +5161,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     def _major_asset_display_name(asset):
         if primary_is_haenam and asset == KR_STOCK_MIX_ASSET:
-            return "코스피200 신호/삼성전자"
+            return "코스피200TR"
         return "나스닥100" if asset == NASDAQ100_ASSET_NAME else asset
 
     def _active_contribution_cols(df, cols, threshold=0.005):
@@ -4688,8 +5198,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             out["합계"] = df["합계"]
         return out
 
-    if mom_kr_samsung_nav is None:
-        st.warning("해남S 집행 데이터가 부족해 이 화면의 메인 백테스트를 Faber A 원형으로 임시 표시합니다.")
+    if mom_kr_passive_nav is None:
+        st.warning("해남P 집행 데이터가 부족해 이 화면의 메인 백테스트를 Faber A 원형으로 임시 표시합니다.")
     st.caption(
         f"메인 전략: {primary_label} | 계산 기간: "
         f"{primary_nav_df.index.min().strftime('%Y-%m-%d')} ~ {primary_nav_df.index.max().strftime('%Y-%m-%d')}"
@@ -4732,7 +5242,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     except Exception:
         allw_nav = None
 
-    # 성과 지표 (해남S 중심)
+    # 성과 지표 (해남P 중심)
     s_value, s_return, s_mdd, s_cagr = calculate_performance_metrics(primary_nav_df, IC)
     s_peak, s_valley, _ = find_mdd_period(primary_nav_df)
     s_monthly_mdd = calculate_monthly_mdd(primary_nav_df)
@@ -4740,8 +5250,8 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
     st.markdown(f"#### 📊 {primary_label} 전략 성과")
     st.caption(
-        "해남S는 연속모멘텀(12개월 점수) 신호를 쓰되, "
-        "코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct로 집행하는 실험 기준입니다. "
+        "해남P는 연속모멘텀(12개월 점수) 신호를 쓰되, "
+        "코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 액티브로 집행하는 기준입니다. "
         "(액티브 ETF 상장 전 구간은 코스피200/나스닥100으로 백테스트. 기존 해남 A와 Faber A는 아래 비교표에 별도 유지.) "
         "Faber A 원형 데이터는 아래 비교표와 차트에 별도 유지합니다."
     )
@@ -4756,7 +5266,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     if s_m_peak and s_m_valley:
         st.info(f"📉 **MDD (월별)**: {s_m_peak.strftime('%Y-%m-%d')}(고점) → {s_m_valley.strftime('%Y-%m-%d')}(저점) | {s_m_mdd_val*100:.2f}%")
 
-    personal_strategy_nav = simulate_haenam_s_strategy(
+    personal_strategy_nav = simulate_haenam_p_strategy(
         DEFAULT_INVESTMENT_START_DATE, current_date, DEFAULT_INITIAL_CAPITAL, primary_strategy_data,
         price_col=price_col
     )
@@ -4796,6 +5306,10 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         extra[old_haenam_label] = (old_haenam_nav, "#8c564b", "dash")
     if primary_is_haenam:
         extra[faber_base_label] = (nav_df, "#1f77b4", "dot")
+    if haenam_p_vix70_nav is not None:
+        extra[HAENAM_P_VIX70_LABEL] = (haenam_p_vix70_nav, "#9467bd", "dash")
+    if haenam_p_vix100_nav is not None:
+        extra[HAENAM_P_VIX100_LABEL] = (haenam_p_vix100_nav, "#e377c2", "dashdot")
     if faber_nasdaq_active_nav is not None:
         extra["Faber A 나스닥 액티브 집행"] = (faber_nasdaq_active_nav, "#d62728", "dash")
     extra["동일비중 B&H"] = (static_nav, "gray", "dot")
@@ -4810,28 +5324,45 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     # ── 정량 비교 테이블 ─────────────────────────────────────
     st.markdown("#### 📐 전략 정량 비교")
     # 대부분 변형은 나스닥 슬롯(액티브 집행)·채권·금·현금 슬롯이 동일하고, 아래 두 축만 다르다:
-    #   (A) 한국주식 20% 슬롯 집행: 코스피 액티브 2종(현버전)/삼성전자/SK하이닉스/삼성·하이닉스 50:50/코스피200 패시브
+    #   (A) 한국주식 20% 슬롯 집행: 코스피 액티브 2종(현버전)/코리아밸류업 액티브·패시브/코스피200 패시브
     #   (B) 투자 방법(신호): Faber A(코스피200/나스닥100 -5% 룰) vs 연속 모멘텀(0.2×12개월 모멘텀 점수)
-    # 삼성전자 연속모멘텀에는 나스닥 액티브 집행과 패시브 집행의 민감도 비교군을 함께 둔다.
-    # 한국 슬롯별로 Faber↔연속모멘텀을 바로 옆에 붙여, 같은 자산에서 어느 신호가 나은지 한눈에 비교한다.
+    # 개별주(삼성전자/SK하이닉스) 변형은 표에서 숨기고, 지수·ETF 슬롯끼리만 한눈에 비교한다.
     quant_labels = [
         FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL,      # 코스피 액티브 2종 — Faber
         MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL,      # 코스피 액티브 2종 — 연속모멘텀
-        FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,   # 삼성전자 — Faber
-        MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL,     # 삼성전자 — 연속모멘텀(코스피200 신호)
-        MOM_PASSIVE_NASDAQ_KR_SAMSUNG_LABEL,    # 삼성전자 — 연속모멘텀(코스피200 신호, 나스닥 패시브)
-        MOM_ACTIVE_NASDAQ_KR_SAMSUNG_SELF_SIGNAL_LABEL,  # 삼성전자 — 연속모멘텀(삼성전자 신호)
-        FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL,     # SK하이닉스 — Faber
-        MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL,       # SK하이닉스 — 연속모멘텀
-        FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL,  # 삼성/하이닉스 50:50 — Faber
-        MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL,    # 삼성/하이닉스 50:50 — 연속모멘텀
-        FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,   # 코스피200 패시브 — Faber
-        MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,     # 코스피200 패시브 — 연속모멘텀
+        HAENAM_V_FABER_LABEL,                   # 코리아밸류업 액티브 2종 — Faber
+        HAENAM_V_MOM_LABEL,                     # 코리아밸류업 액티브 2종 — 연속모멘텀
+        HAENAM_V_PASSIVE_FABER_LABEL,           # 코리아밸류업 패시브 — Faber
+        HAENAM_V_PASSIVE_MOM_LABEL,             # 코리아밸류업 패시브 — 연속모멘텀
+        FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,   # 코스피200TR + 나스닥 액티브 — Faber
+        MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,     # 코스피200TR + 나스닥 액티브 — 연속모멘텀
+        HAENAM_P_VIX70_LABEL,                   # 해남P + VIX 일별 위기매수 — 주식 70% 상한
+        HAENAM_P_VIX100_LABEL,                  # 해남P + VIX 일별 위기매수 — 주식 100% 상한
+        FABER_PASSIVE_NASDAQ_KR_PASSIVE_LABEL,  # 코스피200TR + 나스닥 패시브 — Faber
+        MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL,    # 코스피200TR + 나스닥 패시브 — 연속모멘텀
     ]
+    optional_quant_navs = {
+        HAENAM_P_VIX70_LABEL: haenam_p_vix70_nav,
+        HAENAM_P_VIX100_LABEL: haenam_p_vix100_nav,
+    }
+    quant_labels = [
+        label for label in quant_labels
+        if label not in optional_quant_navs or optional_quant_navs[label] is not None
+    ]
+    quant_labels = [
+        FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,
+        MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,
+        HAENAM_P_LOCAL_SIGNAL_LABEL,
+    ]
+    if haenam_p_local_signal_nav is None:
+        quant_labels = [label for label in quant_labels if label != HAENAM_P_LOCAL_SIGNAL_LABEL]
     st.caption(
-        "✅ 기준 확인: "
+        "표시 기준: "
         + " / ".join(quant_labels)
-        + " 모두 월말 거래일(`_is_month_end_rebalance_day`) 기준으로만 리밸런싱합니다."
+        + "만 비교합니다. 현재 본선은 해남P(코스피 패시브 + 나스닥 액티브 2종, 연속모멘텀)입니다."
+    )
+    st.caption(
+        "실험 열은 미국 자산 신호만 환율 제외 현지통화(QQQ/TLT/GLD) 기준으로 보고, 실제 수익은 기존 해남P처럼 원화 노출 실행 가격으로 계산합니다."
     )
     st.caption(
         "변동성(위험)은 일별 수익률 표준편차를 연율화한 값입니다. 예를 들어 연 변동성 10%는 "
@@ -4862,6 +5393,35 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     def _fmt(v, fmt):
         return fmt.format(v) if v is not None else "-"
 
+    def _fmt_pp(v):
+        return f"{v * 100:+.2f}%p" if v is not None else "-"
+
+    def _event_window_nav(nav, start_date, end_date):
+        if nav is None or nav.empty:
+            return None
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        window = nav[(nav.index >= start_ts) & (nav.index <= end_ts)].copy()
+        if len(window) < 2 or "nav" not in window.columns:
+            return None
+        window["running_max"] = window["nav"].cummax()
+        window["drawdown"] = (window["nav"] - window["running_max"]) / window["running_max"]
+        return window
+
+    def _event_nav_metrics(nav, start_date, end_date):
+        window = _event_window_nav(nav, start_date, end_date)
+        if window is None:
+            return None
+        daily_ret = window["nav"].pct_change().dropna()
+        return {
+            "start": window.index[0],
+            "end": window.index[-1],
+            "return": float(window["nav"].iloc[-1] / window["nav"].iloc[0] - 1.0),
+            "mdd": float(window["drawdown"].min()),
+            "volatility": calculate_annualized_volatility(window),
+            "max_daily_loss": float(daily_ret.min()) if len(daily_ret) > 0 else None,
+        }
+
     quant_strategies = {
         FABER_ACTIVE_NASDAQ_KR_SEMI_LABEL: faber_active_nasdaq_kr_active_nav,
         FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: faber_active_nasdaq_kr_samsung_nav,
@@ -4871,18 +5431,32 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: faber_nasdaq_active_nav,
         # 같은 한국 슬롯 조합을 연속 모멘텀 신호로 집행한 짝.
         MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL: mom_kr_active_nav,
+        HAENAM_V_FABER_LABEL: haenam_v_faber_nav,
+        HAENAM_V_MOM_LABEL: haenam_v_mom_nav,
+        HAENAM_V_PASSIVE_FABER_LABEL: haenam_v_passive_faber_nav,
+        HAENAM_V_PASSIVE_MOM_LABEL: haenam_v_passive_mom_nav,
         MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: mom_kr_samsung_nav,
         MOM_PASSIVE_NASDAQ_KR_SAMSUNG_LABEL: mom_passive_nasdaq_kr_samsung_nav,
         MOM_ACTIVE_NASDAQ_KR_SAMSUNG_SELF_SIGNAL_LABEL: mom_kr_samsung_self_signal_nav,
         MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL: mom_kr_hynix_nav,
         MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: mom_kr_semi_nav,
         MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: mom_kr_passive_nav,
-        # 표에는 노출하지 않지만 아래 'Faber A 원형 승률'·'해남S 하락 민감도' 계산에 필요해 정렬 대상에 유지.
+        HAENAM_P_LOCAL_SIGNAL_LABEL: haenam_p_local_signal_nav,
+        HAENAM_P_VIX70_LABEL: haenam_p_vix70_nav,
+        HAENAM_P_VIX100_LABEL: haenam_p_vix100_nav,
+        FABER_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: nav_df,
+        MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: old_nav,
+        # 표에는 노출하지 않지만 아래 'Faber A 원형 승률'·'해남P 하락 민감도' 계산에 필요해 정렬 대상에 유지.
         faber_base_label: nav_df,
         "이전 전략(연속 모멘텀)": old_nav,
     }
+    display_quant_strategies = {
+        name: quant_strategies.get(name)
+        for name in quant_labels
+        if quant_strategies.get(name) is not None
+    }
     quant_aligned, quant_meta, quant_status_df = align_strategies_to_common_dates(
-        quant_strategies, min_obs_days=252
+        display_quant_strategies, min_obs_days=252
     )
     if quant_meta["common_obs"] > 0:
         st.caption(
@@ -4908,6 +5482,29 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         haenam_semi_turnover_keys = [
             HAENAM_SAMSUNG_NAME,
             HAENAM_HYNIX_NAME,
+            NASDAQ100_ASSET_NAME,
+            HAENAM_TIME_NAME,
+            HAENAM_KOACT_NAME,
+            '한국채30년',
+            '미국채30년',
+            '금현물',
+            CASH_NAME,
+        ]
+        haenam_valueup_turnover_keys = [
+            KR_STOCK_MIX_ASSET,
+            HAENAM_VALUEUP_TIME_NAME,
+            HAENAM_VALUEUP_KOACT_NAME,
+            NASDAQ100_ASSET_NAME,
+            HAENAM_TIME_NAME,
+            HAENAM_KOACT_NAME,
+            '한국채30년',
+            '미국채30년',
+            '금현물',
+            CASH_NAME,
+        ]
+        haenam_valueup_passive_turnover_keys = [
+            KR_STOCK_MIX_ASSET,
+            HAENAM_VALUEUP_PASSIVE_NAME,
             NASDAQ100_ASSET_NAME,
             HAENAM_TIME_NAME,
             HAENAM_KOACT_NAME,
@@ -4950,6 +5547,26 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     calculate_weights_at_date(d, all_data, price_col=price_col), d
                 ) if mom_kr_active_nav is not None else None
             ),
+            HAENAM_V_FABER_LABEL: (
+                lambda d: expand_haenam_v_backtest_weights(
+                    calculate_faber_weights(d, haenam_v_strategy_data, mode='A', price_col=price_col), d
+                ) if haenam_v_strategy_data is not None else None
+            ),
+            HAENAM_V_MOM_LABEL: (
+                lambda d: expand_haenam_v_backtest_weights(
+                    calculate_weights_at_date(d, haenam_v_strategy_data, price_col=price_col), d
+                ) if haenam_v_strategy_data is not None else None
+            ),
+            HAENAM_V_PASSIVE_FABER_LABEL: (
+                lambda d: expand_haenam_v_passive_backtest_weights(
+                    calculate_faber_weights(d, haenam_v_passive_strategy_data, mode='A', price_col=price_col), d
+                ) if haenam_v_passive_strategy_data is not None else None
+            ),
+            HAENAM_V_PASSIVE_MOM_LABEL: (
+                lambda d: expand_haenam_v_passive_backtest_weights(
+                    calculate_weights_at_date(d, haenam_v_passive_strategy_data, price_col=price_col), d
+                ) if haenam_v_passive_strategy_data is not None else None
+            ),
             MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: (
                 lambda d: expand_haenam_execution_weights(
                     calculate_weights_at_date(d, all_data, price_col=price_col), d,
@@ -4985,6 +5602,18 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 lambda d: calculate_weights_at_date(d, all_data, price_col=price_col)
                 if mom_kr_passive_nav is not None else None
             ),
+            HAENAM_P_LOCAL_SIGNAL_LABEL: (
+                lambda d: calculate_weights_at_date(d, haenam_p_local_signal_data, price_col=price_col)
+                if haenam_p_local_signal_data is not None else None
+            ),
+            FABER_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: (
+                lambda d: calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
+                if nav_df is not None else None
+            ),
+            MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: (
+                lambda d: calculate_weights_at_date(d, all_data, price_col=price_col)
+                if old_nav is not None else None
+            ),
             FABER_EX_BONDS_3_LABEL: (
                 lambda d: calculate_faber_weights_for_assets(
                     d, faber_ex3_data, faber_ex3_assets, threshold=0.05, price_col=price_col
@@ -5008,12 +5637,19 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: haenam_semi_turnover_keys,
             FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
             MOM_ACTIVE_NASDAQ_KR_ACTIVE_LABEL: haenam_active_turnover_keys,
+            HAENAM_V_FABER_LABEL: haenam_valueup_turnover_keys,
+            HAENAM_V_MOM_LABEL: haenam_valueup_turnover_keys,
+            HAENAM_V_PASSIVE_FABER_LABEL: haenam_valueup_passive_turnover_keys,
+            HAENAM_V_PASSIVE_MOM_LABEL: haenam_valueup_passive_turnover_keys,
             MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL: haenam_semi_turnover_keys,
             MOM_PASSIVE_NASDAQ_KR_SAMSUNG_LABEL: haenam_semi_turnover_keys,
             MOM_ACTIVE_NASDAQ_KR_SAMSUNG_SELF_SIGNAL_LABEL: haenam_semi_turnover_keys,
             MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL: haenam_semi_turnover_keys,
             MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL: haenam_semi_turnover_keys,
             MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
+            HAENAM_P_LOCAL_SIGNAL_LABEL: full_keys,
+            FABER_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
+            MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL: full_keys,
         }
         for name in quant_labels:
             builder = weight_builders.get(name)
@@ -5108,14 +5744,58 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     else:
         st.warning("⚠️ 전략 정량 비교를 위한 공통 기간 데이터가 부족합니다.")
 
+    event_active_nav = quant_aligned.get(MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL)
+    event_passive_nav = quant_aligned.get(MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL)
+    event_rows = []
+    event_windows = [
+        ("2025년 4월 관세 이슈", pd.Timestamp("2025-04-01"), pd.Timestamp("2025-04-30")),
+        ("2026년 3월 전쟁 이슈", pd.Timestamp("2026-03-01"), pd.Timestamp("2026-03-31")),
+    ]
+    for event_name, event_start, event_end in event_windows:
+        active_stats = _event_nav_metrics(event_active_nav, event_start, event_end)
+        passive_stats = _event_nav_metrics(event_passive_nav, event_start, event_end)
+        if active_stats is None or passive_stats is None:
+            continue
+        mdd_gap = abs(active_stats["mdd"]) - abs(passive_stats["mdd"])
+        vol_gap = (
+            active_stats["volatility"] - passive_stats["volatility"]
+            if active_stats["volatility"] is not None and passive_stats["volatility"] is not None else None
+        )
+        loss_gap = (
+            abs(active_stats["max_daily_loss"]) - abs(passive_stats["max_daily_loss"])
+            if active_stats["max_daily_loss"] is not None and passive_stats["max_daily_loss"] is not None else None
+        )
+        event_rows.append({
+            "이벤트": event_name,
+            "실제 비교 거래일": f"{active_stats['start'].strftime('%Y-%m-%d')}~{active_stats['end'].strftime('%Y-%m-%d')}",
+            "액티브 MDD": _fmt(active_stats["mdd"], "{:.2%}"),
+            "패시브 MDD": _fmt(passive_stats["mdd"], "{:.2%}"),
+            "액티브 MDD 더 큼": _fmt_pp(mdd_gap),
+            "액티브 위험": _fmt(active_stats["volatility"], "{:.2%}"),
+            "패시브 위험": _fmt(passive_stats["volatility"], "{:.2%}"),
+            "액티브 위험 더 큼": _fmt_pp(vol_gap),
+            "액티브 최대 일손실 더 큼": _fmt_pp(loss_gap),
+            "액티브 누적수익": _fmt(active_stats["return"], "{:+.2%}"),
+            "패시브 누적수익": _fmt(passive_stats["return"], "{:+.2%}"),
+        })
+    if event_rows:
+        st.markdown("#### 🔥 해남P 나스닥 액티브 vs 패시브 이벤트 위험")
+        st.caption(
+            "해남P(코스피200TR+나스닥 액티브)를 해남P 나스닥 패시브 버전과 비교합니다. "
+            "MDD는 각 이벤트 월의 첫 거래일 NAV부터 새로 계산했고, 위험은 해당 구간 일수익률 변동성의 연율화 값입니다."
+        )
+        st.dataframe(pd.DataFrame(event_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("⚠️ 해남P 나스닥 액티브/패시브 이벤트 비교에 필요한 공통 거래일 데이터가 부족합니다.")
+
     haenam_downside = calculate_strategy_downside_comparison(
         quant_aligned.get(faber_base_label),
-        quant_aligned.get(MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL),
+        quant_aligned.get(MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL),
     )
     if haenam_downside is not None:
-        st.markdown("#### 🔎 해남S 초과수익 vs 하락 민감도")
+        st.markdown("#### 🔎 해남P 초과수익 vs 하락 민감도")
         st.caption(
-            "Faber A가 오른 달과 빠진 달을 나눠서 해남S가 추가 수익을 냈는지, "
+            "Faber A가 오른 달과 빠진 달을 나눠서 해남P가 추가 수익을 냈는지, "
             "아니면 하락월 손실만 더 키웠는지 보는 표입니다."
         )
         stress_note = (
@@ -5127,56 +5807,56 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                 "구분": "전체 월",
                 "월수": f"{haenam_downside['months']}개월",
                 "Faber A 평균": "-",
-                "해남S 평균": "-",
-                "해남S 초과": _fmt(haenam_downside["avg_excess"], "{:+.2%}"),
+                "해남P 평균": "-",
+                "해남P 초과": _fmt(haenam_downside["avg_excess"], "{:+.2%}"),
                 "해석": "월평균 초과수익이 양수면 장기 알파 후보",
             },
             {
                 "구분": "Faber A 상승월",
                 "월수": f"{haenam_downside['up_months']}개월",
                 "Faber A 평균": _fmt(haenam_downside["up_base_avg"], "{:.2%}"),
-                "해남S 평균": _fmt(haenam_downside["up_target_avg"], "{:.2%}"),
-                "해남S 초과": _fmt(haenam_downside["up_excess_avg"], "{:+.2%}"),
+                "해남P 평균": _fmt(haenam_downside["up_target_avg"], "{:.2%}"),
+                "해남P 초과": _fmt(haenam_downside["up_excess_avg"], "{:+.2%}"),
                 "해석": "상승장에서 집행 알파가 붙는지 확인",
             },
             {
                 "구분": "Faber A 하락월",
                 "월수": f"{haenam_downside['down_months']}개월",
                 "Faber A 평균": _fmt(haenam_downside["down_base_avg"], "{:.2%}"),
-                "해남S 평균": _fmt(haenam_downside["down_target_avg"], "{:.2%}"),
-                "해남S 초과": _fmt(haenam_downside["down_excess_avg"], "{:+.2%}"),
+                "해남P 평균": _fmt(haenam_downside["down_target_avg"], "{:.2%}"),
+                "해남P 초과": _fmt(haenam_downside["down_excess_avg"], "{:+.2%}"),
                 "해석": "음수가 클수록 방어 비용이 큼",
             },
             {
                 "구분": "Faber A -5% 이하 월",
                 "월수": stress_note,
                 "Faber A 평균": _fmt(haenam_downside["stress_base_avg"], "{:.2%}"),
-                "해남S 평균": _fmt(haenam_downside["stress_target_avg"], "{:.2%}"),
-                "해남S 초과": _fmt(haenam_downside["stress_excess_avg"], "{:+.2%}"),
+                "해남P 평균": _fmt(haenam_downside["stress_target_avg"], "{:.2%}"),
+                "해남P 초과": _fmt(haenam_downside["stress_excess_avg"], "{:+.2%}"),
                 "해석": "큰 하락장에서 더 깨지는지 확인",
             },
             {
                 "구분": "하락월 베타",
                 "월수": f"{haenam_downside['down_months']}개월 기준",
                 "Faber A 평균": "1.00",
-                "해남S 평균": _fmt(haenam_downside["down_beta"], "{:.2f}"),
-                "해남S 초과": "-",
+                "해남P 평균": _fmt(haenam_downside["down_beta"], "{:.2f}"),
+                "해남P 초과": "-",
                 "해석": "1보다 크면 Faber A 하락에 더 민감",
             },
             {
                 "구분": "하락월 더 손실 빈도",
                 "월수": f"{haenam_downside['down_months']}개월 기준",
                 "Faber A 평균": "-",
-                "해남S 평균": _fmt(haenam_downside["down_worse_rate"], "{:.1%}"),
-                "해남S 초과": "-",
-                "해석": "하락월에 해남S가 더 나빴던 비율",
+                "해남P 평균": _fmt(haenam_downside["down_worse_rate"], "{:.1%}"),
+                "해남P 초과": "-",
+                "해석": "하락월에 해남P가 더 나빴던 비율",
             },
             {
                 "구분": "상승월 캡처",
                 "월수": f"{haenam_downside['up_months']}개월 기준",
                 "Faber A 평균": "1.00",
-                "해남S 평균": _fmt(haenam_downside["up_capture"], "{:.2f}"),
-                "해남S 초과": "-",
+                "해남P 평균": _fmt(haenam_downside["up_capture"], "{:.2f}"),
+                "해남P 초과": "-",
                 "해석": "1보다 크면 상승장에서 더 강하게 따라감",
             },
         ]
@@ -5187,7 +5867,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.caption("⚠️ 공정 비교 주의/제외 전략")
         st.dataframe(quant_warn_df, use_container_width=True, hide_index=True)
 
-    # ── 정적 자산배분(20% 고정) vs 해남S 비교 ─────────────
+    # ── 정적 자산배분(20% 고정) vs 해남P 비교 ─────────────
 
     st.markdown("---")
     st.subheader(f"📊 정적 자산배분 (20% 균등) vs {primary_label}")
@@ -5360,18 +6040,18 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     else:
         st.warning("정적 균등 전략 데이터가 부족해 공정 비교를 수행할 수 없습니다.")
 
-    # 해남S 월별 비중 변화
+    # 해남P 월별 비중 변화
     st.markdown("---")
     st.subheader(f"📊 {primary_label} 월별 자산 배분 비중")
-    st.caption("💡 **기준신호**: 연속모멘텀(12개월 점수) → 0~20% 노출. 해남S는 코스피200 신호 슬롯을 삼성전자 집행자산으로 변환해 표시합니다.")
+    st.caption("💡 **기준신호**: 연속모멘텀(12개월 점수) → 0~20% 노출. 해남P는 코스피200TR을 그대로 두고 나스닥100 슬롯만 TIME/KoAct 액티브로 변환해 표시합니다.")
     
     trading_dates_all = build_trading_calendar(all_data, bt_start_date, current_date)
     faber_month_ends = _collect_month_end_dates(trading_dates_all)
     
     primary_weight_records = []
     for d in faber_month_ends:
-        base_w = calculate_haenam_s_weights(d, primary_strategy_data, price_col=price_col) if primary_is_haenam else calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
-        w = expand_haenam_s_execution_weights(base_w, d) if primary_is_haenam else base_w
+        base_w = calculate_haenam_p_weights(d, primary_strategy_data, price_col=price_col) if primary_is_haenam else calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
+        w = expand_haenam_p_execution_weights(base_w, d) if primary_is_haenam else base_w
         row = {"date": d}
         for an in primary_asset_keys:
             row[an] = w.get(an, 0.0)
@@ -5411,7 +6091,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
             st.dataframe(disp_fw[["월"] + [_display_asset_name(c) for c in visible_weight_cols]],
                          use_container_width=True, hide_index=True, height=400)
 
-    # 연도별 성과 요약 (해남S 기준)
+    # 연도별 성과 요약 (해남P 기준)
     if primary_nav_df is not None and not primary_nav_df.empty:
         years = sorted(primary_nav_df.index.year.unique())
         if years:
@@ -5429,7 +6109,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
                     "최대 일손실": dfy["max_daily_loss"].apply(lambda x: f"{x*100:.3f}%" if pd.notna(x) else "-"),
                 }), use_container_width=True, hide_index=True)
 
-    # 해남S 월별 자산 수익 기여도 분석
+    # 해남P 월별 자산 수익 기여도 분석
     primary_attr_list = []
     if primary_weight_records and len(primary_weight_records) > 1:
         st.markdown("---")
@@ -5635,7 +6315,7 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
 
         whipsaw_records = []
         for d in month_ends:
-            base_w = calculate_haenam_s_weights(d, primary_strategy_data, price_col=price_col) if primary_is_haenam else calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
+            base_w = calculate_haenam_p_weights(d, primary_strategy_data, price_col=price_col) if primary_is_haenam else calculate_faber_weights(d, all_data, mode='A', price_col=price_col)
             w = base_w
             row = {"월": d.strftime("%Y-%m")}
             for an in whipsaw_asset_keys:
@@ -5715,18 +6395,18 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     data_start = min(bt_start_date, inv_start_date) - relativedelta(months=18)
     with st.spinner("📊 데이터를 불러오는 중..."):
         all_data = load_market_data(data_start, current_date, hybrid=True)
-        haenam_strategy_data = build_haenam_s_strategy_data(
+        haenam_strategy_data = build_haenam_p_strategy_data(
             all_data, data_start, current_date, price_col=price_col
         )
         haenam_price_data = get_haenam_live_price_data(all_data, data_start, current_date)
     if haenam_strategy_data is None:
-        st.warning("해남S 집행 데이터가 부족해 실전 성과 NAV는 Faber A 기준으로 임시 계산합니다.")
+        st.warning("해남P 집행 데이터가 부족해 실전 성과 NAV는 Faber A 기준으로 임시 계산합니다.")
         haenam_strategy_data = all_data
 
-    # 역대 백테스트 MDD 계산 (해남S 기준, 위에서 로딩한 데이터 재사용)
+    # 역대 백테스트 MDD 계산 (해남P 기준, 위에서 로딩한 데이터 재사용)
     live_backtest_initial_capital = 10_000_000
-    with st.spinner("📊 역대 MDD 계산 중 (해남S)..."):
-        bt_nav_full = simulate_haenam_s_strategy(
+    with st.spinner("📊 역대 MDD 계산 중 (해남P)..."):
+        bt_nav_full = simulate_haenam_p_strategy(
             bt_start_date, current_date, live_backtest_initial_capital, haenam_strategy_data, price_col=price_col
         )
         bt_mdd_historical = calculate_performance_metrics(bt_nav_full, live_backtest_initial_capital)[2] if bt_nav_full is not None else None
@@ -5734,7 +6414,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.subheader("📊 성과 분석")
     st.markdown("#### 💼 나의 투자 성과")
-    personal_nav_df = simulate_haenam_s_strategy(
+    personal_nav_df = simulate_haenam_p_strategy(
         inv_start_date, current_date, init_capital, haenam_strategy_data, price_col=price_col
     )
     performance_base_date = personal_nav_df.index[-1] if personal_nav_df is not None and len(personal_nav_df) > 0 else current_date
@@ -5870,9 +6550,9 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 f"기준금액 출처: {nav_source}."
             )
 
-            # 리밸런싱 당시 해남S 실제 집행 비중
-            base_rebal_weights = calculate_haenam_s_weights(rebal_date, haenam_strategy_data, price_col=price_col)
-            rebal_weights = expand_haenam_s_execution_weights(base_rebal_weights, rebal_date)
+            # 리밸런싱 당시 해남P 실제 집행 비중
+            base_rebal_weights = calculate_haenam_p_weights(rebal_date, haenam_strategy_data, price_col=price_col)
+            rebal_weights = expand_haenam_p_execution_weights(base_rebal_weights, rebal_date)
             # 나스닥100 액티브 전환 전에는 참고 성과도 실제 보유분(패시브 미국나스닥100)으로 표시.
             if (HAENAM_NASDAQ_ACTIVE_SWITCH_DATE is None
                     or pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_NASDAQ_ACTIVE_SWITCH_DATE)):
@@ -5881,14 +6561,34 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                     rebal_weights[NASDAQ100_ASSET_NAME] = rebal_weights.get(NASDAQ100_ASSET_NAME, 0.0) + passive_nasdaq_w
 
             # ── [전환월 임시 특례] 슬롯 그릇 교체: 전월 말 rebal → 이번 달 초 전환 ──
-            # 이번 참고 기간(rebal_date=전월 말 5/29)에 두 전환일(코스피 6/1·나스닥 6/2)이 끼어 있어,
+            # 이번 참고 기간(rebal_date=전월 말 5/29)에 한국/나스닥 전환일이 끼어 있으면,
             # 구 보유분(삼전/하닉·패시브 나스닥)은 매도가에 동결(청산익 고정)하고,
-            # 신 보유분(코스피액티브·나스닥액티브)은 매수가부터 시장 추적으로 나눠 표시한다.
+            # 신 보유분(코스피200TR·나스닥액티브)은 매수가부터 시장 추적으로 나눠 표시한다.
             # 체결가는 이 '참고' 표시 전용이며 공식 손익(계좌총액 기준)과 무관하다.
             # ※ 6/30 리밸 후에는 rebal_date >= 각 전환일이라 이 블록을 안 타고 신 보유분만 자동 표시됨 → 그때 이 블록 전체 삭제.
             freeze_px = {}        # 구 보유분 매도가 동결 (px_e 대체)
             active_entry_px = {}  # 신 보유분 매수가 시작 (px_s 대체)
-            # 해남S의 한국 슬롯은 삼성전자 집행을 유지하므로 코스피액티브 전환월 특례를 적용하지 않는다.
+            # 한국 슬롯: 해남 A 실거래 흐름처럼 삼전/하닉 청산 후 해남P의 코스피200TR 보유분으로 표시.
+            if (HAENAM_KR_ACTIVE_SWITCH_DATE is not None
+                    and pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_KR_ACTIVE_SWITCH_DATE) <= pd.Timestamp(current_date)):
+                freeze_px[HAENAM_SAMSUNG_NAME] = 349500.0    # 2026-06-01 매도 체결가 (98주)
+                freeze_px[HAENAM_HYNIX_NAME] = 2364000.0     # 2026-06-01 매도 체결가 (14주)
+                kr_slot_w = (
+                    rebal_weights.get(KR_STOCK_MIX_ASSET, 0.0)
+                    + rebal_weights.get(HAENAM_SAMSUNG_NAME, 0.0)
+                    + rebal_weights.get(HAENAM_HYNIX_NAME, 0.0)
+                )
+                if kr_slot_w > 0:
+                    rebal_weights[KR_STOCK_MIX_ASSET] = kr_slot_w
+                    rebal_weights[HAENAM_SAMSUNG_NAME] = kr_slot_w / 2.0
+                    rebal_weights[HAENAM_HYNIX_NAME] = kr_slot_w / 2.0
+                    kr_entry_px = get_price_at_date(
+                        haenam_price_data.get(KR_STOCK_MIX_ASSET),
+                        HAENAM_KR_ACTIVE_SWITCH_DATE,
+                        price_col=price_col,
+                    )
+                    if kr_entry_px:
+                        active_entry_px[KR_STOCK_MIX_ASSET] = kr_entry_px
             # 나스닥 슬롯: 패시브(미국나스닥100) → 액티브(TIME/KoAct) (2026-06-02 집행)
             if (HAENAM_NASDAQ_ACTIVE_SWITCH_DATE is not None
                     and pd.Timestamp(rebal_date) < pd.Timestamp(HAENAM_NASDAQ_ACTIVE_SWITCH_DATE) <= pd.Timestamp(current_date)):
@@ -6006,8 +6706,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         traded_at = ((rt_kodex or {}).get("traded_at") or "").replace("T", " ")[:16]
         traded_txt = f" | 체결시각: {traded_at}" if traded_at else ""
         st.caption(
-            f"**해남S 룰**: 코스피200 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
-            f"코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
+            f"**해남P 룰**: 코스피200TR 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
+            f"코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
             f"금현물은 KODEX 금액티브(0064K0) 실시간 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f}{traded_txt})"
         )
@@ -6015,30 +6715,30 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         age_min = gold_rt.get("sticky_age_min")
         age_txt = f"{int(age_min):d}분 전 값" if age_min is not None else "최근 성공값"
         st.caption(
-            f"**해남S 룰**: 코스피200 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
-            f"코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
+            f"**해남P 룰**: 코스피200TR 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
+            f"코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
             f"금현물은 0064K0 최근 성공값({age_txt}) 기준. "
             f"(현재가: ₩{rt_kodex_px:,.0f})"
         )
     elif gold_source == "GC_FX_REALTIME":
         st.caption(
-            f"**해남S 룰**: 코스피200 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
-            f"코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
+            f"**해남P 룰**: 코스피200TR 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. "
+            f"코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. "
             f"금현물은 GC=F 실시간 보정(GLD 스케일 환산) 기준(0064K0 fallback). "
             f"(GLD 환산가: ${rt_gc:,.2f} | USD/KRW: ₩{rt_fx:,.0f} | 원화: ₩{rt_gold_krw:,.0f})"
         )
     elif gold_stable_mode:
-        st.caption("**해남S 룰**: 코스피200 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. 코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
+        st.caption("**해남P 룰**: 코스피200TR 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. 코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. 금현물은 0064K0 종가 기준 (실시간 로딩 실패).")
     else:
-        st.caption("**해남S 룰**: 코스피200 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. 코스피200 슬롯은 삼성전자, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
+        st.caption("**해남P 룰**: 코스피200TR 신호에 연속모멘텀(12개월 점수)을 적용해 0~20% 노출. 코스피200 슬롯은 KIWOOM 200TR, 나스닥100 슬롯은 TIME/KoAct 나스닥액티브로 집행합니다. 엄격모드(0064K0만)에서 실시간을 못 받아 종가 기준으로 계산합니다.")
     col_rt1, col_rt2 = st.columns([1, 4])
     with col_rt1:
-        if st.button("🔄 신호표 새로고침", help="해남S 신호 및 추천 비중 섹션만 새로 계산"):
+        if st.button("🔄 신호표 새로고침", help="해남P 신호 및 추천 비중 섹션만 새로 계산"):
             # 전체 데이터 캐시는 유지하고, 신호표 계산에 필요한 실시간 소스만 갱신
             get_realtime_kodex_gold_active.clear()
             get_realtime_gold_krw.clear()
             st.rerun()
-    st.subheader("📋 해남S 신호 및 추천 비중")
+    st.subheader("📋 해남P 신호 및 추천 비중")
     results = []
     for asset_name, ticker in ASSETS.items():
         price_data = all_data.get(asset_name)
@@ -6106,7 +6806,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     df_results = pd.DataFrame(build_haenam_signal_display_rows(results))
     df_rebalance_results = pd.DataFrame(
         expand_haenam_signal_rows(
-            results, current_date, haenam_price_data, price_col=price_col, kr_weights={"samsung": 1.0}
+            results, current_date, haenam_price_data, price_col=price_col, kr_weights={}
         )
     )
     cash_weight = max(0.0, 1.0 - float(df_results["추천비중"].sum()))
@@ -6189,7 +6889,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.subheader("🏦 3계좌 절세 최적화 리밸런싱")
-    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=삼성전자 우선 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
+    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=코스피200TR 우선 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
     if st.button("🚀 리밸런싱 목표 계산하기", type="primary"):
         with st.spinner("계산 중..."):
             final_df = optimize_allocation(
