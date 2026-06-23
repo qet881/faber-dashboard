@@ -42,6 +42,9 @@ Recession:
 - Treat lagging strength as potentially dangerous near cycle tops.
 - Treat terrible news and weak lagging data as potentially stale near cycle bottoms.
 - Use market rotation only as cross-validation, not the primary judge.
+- Read the sentiment (fear/greed) layer contrarianly: fear/capitulation extremes (high VIX, wide credit spreads, deep drawdown) are contrarian-bullish and cluster near bottoms; complacency/greed extremes (low VIX, tight spreads, at highs) are late-cycle warnings near tops. Sentiment is cross-validation, not the primary judge.
+- Use the asset peak-order table to gauge cycle maturity: equities usually top first, consumer/luxury next, real estate last. If equities are well off their high while real estate is still at its high, the cycle is likely late but not yet fully rolled over.
+- Qualitative top-signals (bookstore index, human index) are manual inputs with no data feed. Use them only as soft confirmation when present, never as a primary judge. If blank, say "정성 신호 입력 없음" and do not invent them.
 - Mention conflicting evidence.
 - If the evidence is transitional, say which transition is underway.
 - Estimate where the phase sits on its own arc: early, early-mid, mid, late, or terminal.
@@ -73,6 +76,11 @@ Recession:
 **[시장 로테이션 교차 검증]**
 * 현재 시장 강세 자산/지수/업종 흐름과 경기국면 진단의 일치 여부
 * 불일치한다면 유동성, 금리, 테마, 환율 등 가능한 원인을 추론
+
+**[투자자 심리 · 고점 신호]**
+* 공포/탐욕 상태: [항복/공포 / 중립 / 탐욕/과열] -> 역발상 해석 (VIX, 신용스프레드, 고점대비 낙폭 근거)
+* 자산 고점 순서: 주식/소비재/부동산이 각자 고점 대비 어디에 있는지로 본 사이클 성숙도
+* 정성 신호(서점/인간 지표): 수동 입력이 있으면 보조 확인용으로만, 없으면 "입력 없음"으로 명시
 
 **[포트폴리오 대응 지침]**
 * 해남P와의 관계: [독립 / 위성 / 오버레이 / 적용 안 함]

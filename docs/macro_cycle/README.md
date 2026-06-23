@@ -44,6 +44,23 @@ Suggested path:
 docs/macro_cycle/report-YYYY-MM-DD.md
 ```
 
+## Evidence Layers
+
+The evidence pack covers four indicator families plus two contrarian/qualitative layers:
+
+- Leading / coincident / lagging macro + leading price indices (the core 4-stage cycle engine).
+- ISM PMI headline is proprietary, so only latest/previous is scraped; the script
+  accumulates each reading into `pmi_history.csv` so a real 3M/6M/12M trend rebuilds
+  over repeated runs. Live FRED proxies (new orders, Empire State, Philadelphia Fed)
+  give an immediate manufacturing-direction read.
+- Market and sector rotation (cross-validation only).
+- Investor sentiment (fear/greed): VIX, high-yield credit spread, S&P drawdown from
+  its trailing high. Read contrarianly — fear extremes near bottoms, complacency near tops.
+- Asset peak order: equities, consumer/luxury, and real estate (XLRE + Case-Shiller)
+  measured against their own trailing highs to gauge cycle maturity.
+- Qualitative top-signals (bookstore index, human index): manual input only, no data
+  feed. Soft confirmation, never the primary judge.
+
 ## Portfolio Boundary
 
 Portfolio guidance is allowed, but only as a macro-cycle allocation guide.
