@@ -3778,8 +3778,9 @@ def expand_haenam_active_backtest_weights(base_weights, as_of_date):
     out[CASH_NAME] = max(0.0, 1.0 - invested)
     return {k: v for k, v in out.items() if v > 0.000001}
 
-def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col="Adj Close", kr_weights=None):
-    """신호표의 기준 신호 행을 해남 A 실제 매수 대상 행으로 확장한다."""
+def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col="Adj Close", kr_weights=None,
+                              nasdaq_active=True):
+    """신호표의 기준 신호 행을 실전 매수 대상 행으로 확장한다."""
     rows = []
     for row in signal_rows:
         asset = row.get("자산명")
@@ -3803,14 +3804,17 @@ def expand_haenam_signal_rows(signal_rows, as_of_date, price_data_map, price_col
             if not components:
                 components = [(asset, row.get("티커"), weight)]
         elif asset == NASDAQ100_ASSET_NAME and weight > 0:
-            targets = _nasdaq_active_execution_targets(as_of_date)
             components = []
-            if targets.get("base", 0.0) > 0:
-                components.append((NASDAQ100_ASSET_NAME, ASSETS.get(NASDAQ100_ASSET_NAME), weight * targets["base"]))
-            if targets.get("time", 0.0) > 0:
-                components.append((HAENAM_TIME_NAME, TIME_NASDAQ_ACTIVE_TICKER, weight * targets["time"]))
-            if targets.get("koact", 0.0) > 0:
-                components.append((HAENAM_KOACT_NAME, KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, weight * targets["koact"]))
+            if nasdaq_active:
+                targets = _nasdaq_active_execution_targets(as_of_date)
+                if targets.get("base", 0.0) > 0:
+                    components.append((NASDAQ100_ASSET_NAME, ASSETS.get(NASDAQ100_ASSET_NAME), weight * targets["base"]))
+                if targets.get("time", 0.0) > 0:
+                    components.append((HAENAM_TIME_NAME, TIME_NASDAQ_ACTIVE_TICKER, weight * targets["time"]))
+                if targets.get("koact", 0.0) > 0:
+                    components.append((HAENAM_KOACT_NAME, KOACT_NASDAQ_GROWTH_ACTIVE_TICKER, weight * targets["koact"]))
+            else:
+                components.append((NASDAQ100_ASSET_NAME, ASSETS.get(NASDAQ100_ASSET_NAME), weight))
         else:
             components = [(asset, row.get("티커"), weight)]
 
@@ -7707,13 +7711,18 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     # 역대 백테스트 MDD 계산 (Faber A 원조 기준, 위에서 로딩한 데이터 재사용)
     live_backtest_initial_capital = 10_000_000
-    with st.spinner("📊 역대 MDD 계산 중 (Faber A 원조)..."):
+    with st.spinner("📊 역대 MDD 계산 중 (Faber A 원조/연속모멘텀)..."):
         bt_nav_full = simulate_faber_strategy(
             bt_start_date, current_date, live_backtest_initial_capital, haenam_strategy_data,
             mode='A', buffer_df=None, price_col=price_col
         )
+        bt_mom_nav_full = simulate_daily_nav_with_attribution(
+            bt_start_date, current_date, live_backtest_initial_capital, haenam_strategy_data, price_col=price_col
+        )[0]
         bt_mdd_historical = calculate_performance_metrics(bt_nav_full, live_backtest_initial_capital)[2] if bt_nav_full is not None else None
         bt_monthly_mdd_historical = calculate_monthly_mdd(bt_nav_full) if bt_nav_full is not None else None
+        bt_mom_mdd_historical = calculate_performance_metrics(bt_mom_nav_full, live_backtest_initial_capital)[2] if bt_mom_nav_full is not None else None
+        bt_mom_monthly_mdd_historical = calculate_monthly_mdd(bt_mom_nav_full) if bt_mom_nav_full is not None else None
 
     st.subheader("📊 성과 분석")
     st.markdown("#### 💼 나의 투자 성과")
@@ -7721,6 +7730,9 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         inv_start_date, current_date, init_capital, haenam_strategy_data,
         mode='A', buffer_df=None, price_col=price_col
     )
+    personal_mom_nav_df = simulate_daily_nav_with_attribution(
+        inv_start_date, current_date, init_capital, haenam_strategy_data, price_col=price_col
+    )[0]
     performance_base_date = personal_nav_df.index[-1] if personal_nav_df is not None and len(personal_nav_df) > 0 else current_date
     cumulative_principal = calculate_cumulative_principal(
         init_capital,
@@ -7742,6 +7754,27 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     c3.metric("실제 손익", f"{recorded_principal_gap:,.0f}원", delta=f"{recorded_return_on_principal:.2%}")
     c4.metric("MDD (일별)", f"{p_mdd_daily*100:.2f}%" if p_mdd_daily is not None else "N/A")
     c5.metric("MDD (월별)", f"{p_mdd_monthly*100:.2f}%" if p_mdd_monthly is not None else "N/A")
+    strategy_compare_rows = []
+    for label, strategy_nav in [
+        ("Faber A -5%룰", personal_nav_df),
+        ("연속모멘텀", personal_mom_nav_df),
+    ]:
+        if strategy_nav is None or len(strategy_nav) == 0:
+            continue
+        _, _, strat_mdd_daily, _ = calculate_performance_metrics(strategy_nav, init_capital)
+        strat_mdd_monthly = calculate_monthly_mdd(strategy_nav)
+        latest_nav = float(strategy_nav["nav"].iloc[-1])
+        strategy_compare_rows.append({
+            "전략": label,
+            "전략 NAV": f"{latest_nav:,.0f}원",
+            "누적 원금 대비 전략 손익": f"{latest_nav - cumulative_principal:+,.0f}원",
+            "전략 수익률": f"{latest_nav / cumulative_principal - 1:+.2%}" if cumulative_principal > 0 else "-",
+            "MDD(일별)": f"{strat_mdd_daily*100:.2f}%" if strat_mdd_daily is not None else "-",
+            "MDD(월별)": f"{strat_mdd_monthly*100:.2f}%" if strat_mdd_monthly is not None else "-",
+        })
+    if strategy_compare_rows:
+        st.markdown("##### 전략 기준 비교")
+        st.dataframe(pd.DataFrame(strategy_compare_rows), use_container_width=True, hide_index=True)
     st.warning(
         "입출금이 PERSONAL_CASH_FLOWS에 기록되지 않으면 현재 운용자산과 누적 원금의 차이가 수익처럼 보일 수 있습니다. "
         "사이드바 계좌 잔고 변경분은 자동으로 입출금과 투자 성과를 구분할 수 없으므로, 외부 입출금은 반드시 PERSONAL_CASH_FLOWS에 기록해 주세요."
@@ -7854,100 +7887,137 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
                 f"기준금액 출처: {nav_source}."
             )
 
-            # 리밸런싱 당시 원조 Faber A 패시브 자산 비중
-            rebal_weights = calculate_faber_weights(rebal_date, haenam_strategy_data, mode='A', price_col=price_col)
-            freeze_px = {}
-            active_entry_px = {}
+            def _month_period_mdd(strategy_nav):
+                if strategy_nav is None or strategy_nav.empty:
+                    return None
+                period = strategy_nav[
+                    (strategy_nav.index >= pd.Timestamp(rebal_date))
+                    & (strategy_nav.index <= pd.Timestamp(current_date))
+                ].copy()
+                if len(period) < 2:
+                    return None
+                running_max = period["nav"].cummax()
+                dd = (period["nav"] - running_max) / running_max
+                return float(dd.min())
 
-            monthly_rows = []
-            total_pnl = 0.0
-            asset_labels = [k for k, v in rebal_weights.items() if v >= 0.001]
-            for an in asset_labels:
-                w = rebal_weights.get(an, 0.0)
-                if w < 0.001:
+            def _build_monthly_reference_rows(strategy_label, strategy_weights, basis_nav):
+                rows = []
+                total = 0.0
+                for an in [k for k, v in strategy_weights.items() if v >= 0.001]:
+                    w = float(strategy_weights.get(an, 0.0))
+                    if w < 0.001:
+                        continue
+                    alloc_won = basis_nav * w
+                    if an == CASH_NAME:
+                        px_s = get_price_at_date(all_data.get(CASH_NAME), rebal_date, price_col=price_col) or 10000.0
+                        px_e = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or px_s
+                    else:
+                        px_s = get_price_at_date(haenam_price_data.get(an), rebal_date, price_col=price_col)
+                        px_e = get_price_at_date(haenam_price_data.get(an), current_date, price_col=price_col)
+                    if not px_s or px_s <= 0 or not px_e or px_e <= 0:
+                        continue
+                    ret = (px_e / px_s) - 1.0
+                    pnl = alloc_won * ret
+                    total += pnl
+                    rows.append({
+                        "전략": strategy_label,
+                        "자산": an,
+                        "_raw": an,
+                        "비중": f"{w*100:.1f}%",
+                        "배분금액": f"{alloc_won:,.0f}원",
+                        "기준가(리밸)": f"{px_s:,.2f}",
+                        "현재가": f"{px_e:,.2f}",
+                        "수익률": ret * 100,
+                        "손익(원)": pnl,
+                    })
+                return rows, total
+
+            def _cat_rank(raw):
+                if raw == KR_STOCK_MIX_ASSET: return 0
+                if raw == NASDAQ100_ASSET_NAME: return 1
+                if raw == '미국채30년': return 2
+                if raw == '한국채30년': return 3
+                if raw == '금현물': return 4
+                if raw == CASH_NAME: return 6
+                return 5
+
+            strategy_refs = []
+            faber_weights = calculate_faber_weights(rebal_date, haenam_strategy_data, mode='A', price_col=price_col)
+            momentum_weights = calculate_weights_at_date(rebal_date, haenam_strategy_data, price_col=price_col)
+            for label, strategy_nav, weights, bt_daily, bt_monthly in [
+                ("Faber A -5%룰", personal_nav_df, faber_weights, bt_mdd_historical, bt_monthly_mdd_historical),
+                ("연속모멘텀", personal_mom_nav_df, momentum_weights, bt_mom_mdd_historical, bt_mom_monthly_mdd_historical),
+            ]:
+                if strategy_nav is None or len(strategy_nav) == 0:
                     continue
-                alloc_won = nav_at_rebal * w
-                if an == CASH_NAME:
-                    px_s = get_price_at_date(all_data.get(CASH_NAME), rebal_date, price_col=price_col) or 10000.0
-                    px_e = get_price_at_date(all_data.get(CASH_NAME), current_date, price_col=price_col) or px_s
-                else:
-                    px_s = get_price_at_date(haenam_price_data.get(an), rebal_date, price_col=price_col)
-                    px_e = get_price_at_date(haenam_price_data.get(an), current_date, price_col=price_col)
-                    if an in active_entry_px:
-                        px_s = active_entry_px[an]   # 신 보유분(액티브): 매수가부터 시장 추적
-                    if an in freeze_px:
-                        px_e = freeze_px[an]          # 구 보유분: 매도가에 동결(청산익 고정)
-                if not px_s or px_s <= 0 or not px_e or px_e <= 0:
-                    continue
-                ret = (px_e / px_s) - 1.0
-                pnl = alloc_won * ret
-                total_pnl += pnl
-                monthly_rows.append({
-                    "자산": f"{an}(매도청산)" if an in freeze_px else an,
-                    "_raw": an,
-                    "_frozen": an in freeze_px,
-                    "비중": f"{w*100:.0f}%",
-                    "배분금액": f"{alloc_won:,.0f}원",
-                    "기준가(리밸)": f"{px_s:,.2f}",
-                    "현재가": f"{px_e:,.2f}",
-                    "수익률": ret * 100,
-                    "손익(원)": pnl,
+                basis_nav, basis_source, _ = get_rebalance_basis_nav(rebal_date, strategy_nav)
+                strategy_flow = calculate_period_cash_flow(PERSONAL_CASH_FLOWS, rebal_date, current_date)
+                basis_profit = current_total_assets - basis_nav - strategy_flow
+                basis_return = basis_profit / basis_nav if basis_nav > 0 else None
+                month_mdd = _month_period_mdd(strategy_nav)
+                rows, total_pnl = _build_monthly_reference_rows(label, weights, basis_nav)
+                strategy_refs.append({
+                    "label": label,
+                    "basis_nav": basis_nav,
+                    "basis_source": basis_source,
+                    "basis_profit": basis_profit,
+                    "basis_return": basis_return,
+                    "month_mdd": month_mdd,
+                    "bt_daily_mdd": bt_daily,
+                    "bt_monthly_mdd": bt_monthly,
+                    "rows": sorted(rows, key=lambda r: _cat_rank(r["_raw"])),
+                    "total_pnl": total_pnl,
                 })
 
-            if monthly_rows:
+            if strategy_refs:
+                st.markdown("##### 전략별 이번 달 기준 손익/MDD")
+                compare_df = pd.DataFrame([{
+                    "전략": ref["label"],
+                    "기준 총자산": f"{ref['basis_nav']:,.0f}원",
+                    "기준금액 출처": ref["basis_source"],
+                    "기준 손익": f"{ref['basis_profit']:+,.0f}원",
+                    "기준 수익률": f"{ref['basis_return']:+.2%}" if ref["basis_return"] is not None else "-",
+                    "이번달 MDD": f"{ref['month_mdd']*100:.2f}%" if ref["month_mdd"] is not None else "-",
+                    "역대 MDD(일별)": f"{ref['bt_daily_mdd']*100:.2f}%" if ref["bt_daily_mdd"] is not None else "-",
+                    "역대 MDD(월별)": f"{ref['bt_monthly_mdd']*100:.2f}%" if ref["bt_monthly_mdd"] is not None else "-",
+                } for ref in strategy_refs])
+                st.dataframe(compare_df, use_container_width=True, hide_index=True)
+
                 st.markdown("##### 참고: 자산별 가격변동 추정")
-                # 표시 순서: 한국주식 → 미국주식 → 미국채권 → 한국채권 → 금 → 기타 → 현금.
-                # 청산분(매도청산)은 현 보유분과 분리해 아랫줄에 따로 표시한다.
-                _kr_stock = {HAENAM_KR_TIME_NAME, HAENAM_KR_KOACT_NAME, HAENAM_SAMSUNG_NAME, HAENAM_HYNIX_NAME, KR_STOCK_MIX_ASSET}
-                _us_stock = {HAENAM_TIME_NAME, HAENAM_KOACT_NAME, NASDAQ100_ASSET_NAME}
-                def _cat_rank(raw):
-                    if raw in _kr_stock: return 0
-                    if raw in _us_stock: return 1
-                    if raw == '미국채30년': return 2
-                    if raw == '한국채30년': return 3
-                    if raw == '금현물': return 4
-                    if raw == CASH_NAME: return 6
-                    return 5
-                current_rows = sorted([r for r in monthly_rows if not r["_frozen"]], key=lambda r: _cat_rank(r["_raw"]))
-                liquidated_rows = sorted([r for r in monthly_rows if r["_frozen"]], key=lambda r: _cat_rank(r["_raw"]))
-
-                # 현 보유분 + 참고 합계 (윗줄)
-                cols_m = st.columns(len(current_rows) + 1)
-                for i, row in enumerate(current_rows):
-                    cols_m[i].metric(
-                        label=row["자산"],
-                        value=f"{row['수익률']:+.2f}%",
-                        delta=f"{row['손익(원)']:+,.0f}원",
-                    )
-                cols_m[-1].metric(
-                    label="📊 참고 합계",
-                    value=f"{total_pnl:+,.0f}원",
-                    delta=f"{total_pnl/nav_at_rebal*100:+.2f}%" if nav_at_rebal > 0 else "N/A",
-                )
-
-                # 이번 달 중 매도청산 (아랫줄, 있을 때만): 수익률이 매도가에 고정된 자산
-                if liquidated_rows:
-                    st.caption("↓ 이번 달 중 매도청산 (수익률은 매도가에 고정 — 다음 달 리밸 후 자동으로 사라짐)")
-                    cols_liq = st.columns(max(len(current_rows) + 1, len(liquidated_rows)))
-                    for i, row in enumerate(liquidated_rows):
-                        cols_liq[i].metric(
-                            label=row["자산"],
-                            value=f"{row['수익률']:+.2f}%",
-                            delta=f"{row['손익(원)']:+,.0f}원",
+                tabs = st.tabs([ref["label"] for ref in strategy_refs])
+                for tab, ref in zip(tabs, strategy_refs):
+                    with tab:
+                        current_rows = ref["rows"]
+                        if not current_rows:
+                            st.info("표시할 자산별 참고 성과가 없습니다.")
+                            continue
+                        cols_m = st.columns(len(current_rows) + 1)
+                        for i, row in enumerate(current_rows):
+                            cols_m[i].metric(
+                                label=row["자산"],
+                                value=f"{row['수익률']:+.2f}%",
+                                delta=f"{row['손익(원)']:+,.0f}원",
+                            )
+                        cols_m[-1].metric(
+                            label="📊 참고 합계",
+                            value=f"{ref['total_pnl']:+,.0f}원",
+                            delta=f"{ref['total_pnl']/ref['basis_nav']*100:+.2f}%" if ref["basis_nav"] > 0 else "N/A",
                         )
-
-                with st.expander("📋 이번 달 자산별 상세"):
-                    detail_df = pd.DataFrame([{
-                        "자산": r["자산"],
-                        "비중": r["비중"],
-                        "배분금액": r["배분금액"],
-                        "기준가(리밸)": r["기준가(리밸)"],
-                        "현재가": r["현재가"],
-                        "수익률": f"{r['수익률']:+.2f}%",
-                        "손익(원)": f"{r['손익(원)']:+,.0f}원",
-                    } for r in (current_rows + liquidated_rows)])
-                    st.dataframe(detail_df, use_container_width=True, hide_index=True)
-                st.caption(f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 당시 NAV {nav_at_rebal:,.0f}원 기준({nav_source}). 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음.")
+                        with st.expander(f"📋 {ref['label']} 이번 달 자산별 상세"):
+                            detail_df = pd.DataFrame([{
+                                "자산": r["자산"],
+                                "비중": r["비중"],
+                                "배분금액": r["배분금액"],
+                                "기준가(리밸)": r["기준가(리밸)"],
+                                "현재가": r["현재가"],
+                                "수익률": f"{r['수익률']:+.2f}%",
+                                "손익(원)": f"{r['손익(원)']:+,.0f}원",
+                            } for r in current_rows])
+                            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+                        st.caption(
+                            f"※ 기준: {rebal_date.strftime('%Y-%m-%d')} 리밸런싱 당시 {ref['label']} NAV "
+                            f"{ref['basis_nav']:,.0f}원 기준({ref['basis_source']}). 자산별 가격변동으로 추정한 값이며 실제와 차이 있을 수 있음."
+                        )
     except Exception as e:
         st.warning(f"이번 달 성과 계산 오류: {e}")
 
@@ -8065,7 +8135,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
     df_results = pd.DataFrame(build_haenam_signal_display_rows(results))
     df_rebalance_results = pd.DataFrame(
         expand_haenam_signal_rows(
-            results, current_date, haenam_price_data, price_col=price_col, kr_weights={}
+            results, current_date, haenam_price_data, price_col=price_col, kr_weights={},
+            nasdaq_active=False
         )
     )
     cash_weight = max(0.0, 1.0 - float(df_results["추천비중"].sum()))
@@ -8148,7 +8219,7 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
 
     st.markdown("---")
     st.subheader("🏦 3계좌 절세 최적화 리밸런싱")
-    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=코스피200TR 우선 / ISA_A=채권 우선 / ISA_B=나스닥 액티브 우선")
+    st.info("👇 우선순위 배치: 금=금계좌 고정 / 일반=코스피200 우선 / ISA_A=채권 우선 / ISA_B=미국나스닥100 패시브 우선")
     if st.button("🚀 리밸런싱 목표 계산하기", type="primary"):
         with st.spinner("계산 중..."):
             final_df = optimize_allocation(
@@ -8191,8 +8262,8 @@ def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date,
         ex["추천비중"] = ex["추천비중"]*100
         ex = ex[["신호자산", "자산명", "티커", "현재가", "12M고점", "고점대비", "모멘텀", "기준신호", "추천비중"]]
         ex.columns = ["신호자산","집행자산","티커","현재가","12M고점","고점대비","모멘텀","신호","추천비중(%)"]
-        ex.to_excel(writer, sheet_name="Haenam_S_리밸런싱", index=False)
-    st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"HaenamS_리밸런싱_{current_dt.strftime('%Y%m%d')}.xlsx",
+        ex.to_excel(writer, sheet_name="FaberA_리밸런싱", index=False)
+    st.download_button("📥 엑셀 파일 다운로드", output.getvalue(), f"FaberA_리밸런싱_{current_dt.strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 

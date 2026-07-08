@@ -205,11 +205,15 @@ def test_strategy_quant_comparison_includes_event_risk_windows():
 def test_live_monthly_reference_uses_original_faber_a_passive_weights():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
-    assert "리밸런싱 당시 원조 Faber A 패시브 자산 비중" in source
-    assert "rebal_weights = calculate_faber_weights(rebal_date, haenam_strategy_data, mode='A', price_col=price_col)" in source
+    assert "faber_weights = calculate_faber_weights(rebal_date, haenam_strategy_data, mode='A', price_col=price_col)" in source
+    assert "momentum_weights = calculate_weights_at_date(rebal_date, haenam_strategy_data, price_col=price_col)" in source
+    assert '("Faber A -5%룰", personal_nav_df, faber_weights' in source
+    assert '("연속모멘텀", personal_mom_nav_df, momentum_weights' in source
+    assert "전략별 이번 달 기준 손익/MDD" in source
+    assert '"기준 손익"' in source
+    assert '"이번달 MDD"' in source
     assert "freeze_px[HAENAM_SAMSUNG_NAME] = 349500.0" not in source
     assert "freeze_px[HAENAM_HYNIX_NAME] = 2364000.0" not in source
-    assert '"자산": f"{an}(매도청산)" if an in freeze_px else an' in source
 
 
 def test_active_backtest_weight_expansion_keeps_nasdaq_active():
@@ -246,7 +250,7 @@ def test_live_balance_defaults_recover_from_zero_state():
     assert "_ensure_account_balance_state()" in source
 
 
-def test_live_signal_display_uses_haenam_p_execution_assets():
+def test_live_signal_display_keeps_original_faber_passive_execution():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
     assert "def build_haenam_signal_display_rows" in source
@@ -255,10 +259,12 @@ def test_live_signal_display_uses_haenam_p_execution_assets():
         r"df_rebalance_results = pd\.DataFrame\(\s*"
         r"expand_haenam_signal_rows\(\s*"
         r"results, current_date, haenam_price_data, price_col=price_col, kr_weights=\{\}\s*"
+        r",\s*nasdaq_active=False\s*"
         r"\)\s*"
         r"\)",
         source,
     )
+    assert "FaberA_리밸런싱" in source
     assert "df_results_orig = df_rebalance_results.copy()  # 리밸런싱용" in source
     assert "df_display = df_rebalance_results.copy()" in source
 

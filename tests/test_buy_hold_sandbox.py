@@ -120,7 +120,7 @@ def test_buy_hold_zero_weights_fall_back_to_baseline():
 def test_buy_hold_mode_is_added_without_removing_existing_modes():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
-    assert "1. 내 자산 & 리밸런싱 (실전)" in source
+    assert "1. MAIN" in source
     assert "2. 전략 백테스트 (시장 분석)" in source
     assert "3. 몬테카를로 시뮬레이션" in source
     assert "4. Buy & Hold" in source
