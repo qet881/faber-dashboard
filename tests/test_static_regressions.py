@@ -1,9 +1,18 @@
+import ast
 from pathlib import Path
 import re
 import symtable
 
 
 APP_SOURCE = Path(__file__).resolve().parents[1] / "app.py"
+
+
+def _module_assignment(name: str):
+    tree = ast.parse(APP_SOURCE.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(target, "id", None) == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} was not found")
 
 
 def _function_symbol_table(function_name: str) -> symtable.SymbolTable:
@@ -311,6 +320,15 @@ def test_faber_a_live_mode_keeps_legacy_mdd_and_optional_portfolio_snapshot():
     assert 'st.subheader("Faber A 실전 & 리밸런싱")' in source
     assert '"1. MAIN"' in source
     assert "signal_weight = 0.20 if near_high else 0.0" in source
+
+
+def test_default_monthly_ledger_has_confirmed_june_2026_basis():
+    ledger = _module_assignment("DEFAULT_MONTHLY_LEDGER")
+    june = ledger["2026-06"]
+
+    assert june["month_end_date"] == "2026-06-30"
+    assert june["month_end_assets"] == 319_352_259
+    assert june["official_profit"] == 6_940_263
 
 
 def test_main_menu_restores_legacy_backtest_surfaces_centered_on_faber_a():

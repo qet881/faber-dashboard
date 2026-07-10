@@ -751,6 +751,18 @@ DEFAULT_MONTHLY_LEDGER = {
         "official_profit": 28_846_668,
         "official_return": 0.1017,
     },
+    "2026-06": {
+        "month": "2026-06",
+        "month_start_date": "2026-05-29",
+        "month_start_assets": 312_411_996,
+        "month_end_date": "2026-06-30",
+        "month_end_assets": 319_352_259,
+        "deposit": 0,
+        "withdrawal": 0,
+        "net_external_cash_flow": 0,
+        "official_profit": 6_940_263,
+        "official_return": 0.0222,
+    },
 }
 
 
