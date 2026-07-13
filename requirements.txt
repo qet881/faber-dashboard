@@ -1,14 +1,17 @@
-# Keep Streamlit Community Cloud builds reproducible.
-# The app was rebuilt after a data-only commit, so avoid pulling same-day
-# framework/runtime releases that were not part of the last successful build.
-streamlit==1.59.1
+# Streamlit Community Cloud may keep an older Python runtime for existing apps.
+# Use Python-version markers so dependency resolution succeeds on both Python 3.9
+# and newer runtimes instead of aborting the whole requirements installation.
+streamlit==1.45.1; python_version < "3.10"
+streamlit==1.59.1; python_version >= "3.10"
 finance-datareader==0.9.202
 pandas==2.2.3
-numpy==2.2.6
+numpy==2.0.2; python_version < "3.10"
+numpy==2.2.6; python_version >= "3.10"
 pytz
 python-dateutil
 plotly
 fredapi
 requests
 openpyxl
-yfinance==1.4.1
+yfinance==0.2.65; python_version < "3.10"
+yfinance==1.4.1; python_version >= "3.10"
