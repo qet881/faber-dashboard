@@ -13,12 +13,12 @@
       "status": "ok"
     },
     "385720": {
-      "error": "",
-      "status": "ok"
+      "error": "TIME holdings table parsed empty",
+      "status": "source_error"
     },
     "426030": {
-      "error": "",
-      "status": "ok"
+      "error": "TIME holdings table parsed empty",
+      "status": "source_error"
     }
   },
   "snapshots": {
@@ -790,7 +790,7 @@
       ],
       "issuer": "KoAct",
       "name": "KOACT 코스피액티브",
-      "source_hash": "0a74ad585902de61",
+      "source_hash": "74359f762abc9091",
       "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFV2&gijunYMD=20260716",
       "ticker": "0193G0"
     },
@@ -1447,5 +1447,5 @@
       "ticker": "426030"
     }
   },
-  "updated_at_kst": "2026-07-16T12:31:35.185232+09:00"
+  "updated_at_kst": "2026-07-17T09:10:48.736338+09:00"
 }
