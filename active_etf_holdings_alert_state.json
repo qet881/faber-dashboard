@@ -1,8 +1,8 @@
 {
-  "last_message_hash": "f996ce69f9e9b361",
-  "last_message_key": "ee8685b5212c538f",
+  "last_message_hash": "01951b33549e1e44",
+  "last_message_key": "ce0773e642017581",
   "last_messages": {},
-  "last_sent_at_kst": "2026-07-16T12:31:35.185232+09:00",
+  "last_sent_at_kst": "2026-07-20T09:09:51.541239+09:00",
   "last_status": {
     "0015B0": {
       "error": "",
@@ -13,1439 +13,1447 @@
       "status": "ok"
     },
     "385720": {
-      "error": "TIME holdings table parsed empty",
-      "status": "source_error"
+      "error": "",
+      "status": "ok"
     },
     "426030": {
-      "error": "TIME holdings table parsed empty",
-      "status": "source_error"
+      "error": "",
+      "status": "ok"
     }
   },
   "snapshots": {
     "0015B0": {
-      "disclosure_date": "2026-07-16",
+      "disclosure_date": "2026-07-20",
       "holdings": [
         {
           "code": "AMD US EQUITY",
           "name": "ADVANCED MICRO DEVICES",
-          "quantity": "96.74",
+          "quantity": "96.37",
           "rank": 1,
-          "value": "78727845",
-          "weight": 7.14
+          "value": "75490365",
+          "weight": 7.11
         },
         {
           "code": "INTC US EQUITY",
           "name": "INTEL Corp",
-          "quantity": "363.65",
+          "quantity": "362.26",
           "rank": 2,
-          "value": "58180826",
-          "weight": 5.27
+          "value": "55232476",
+          "weight": 5.2
         },
         {
           "code": "SNDK US EQUITY",
           "name": "Sandisk Corp/DE",
-          "quantity": "21.43",
+          "quantity": "21.35",
           "rank": 3,
-          "value": "55928771",
-          "weight": 5.07
+          "value": "51044562",
+          "weight": 4.8
         },
         {
           "code": "MU US EQUITY",
           "name": "MICRON TECH",
-          "quantity": "37.19",
+          "quantity": "37.05",
           "rank": 4,
-          "value": "54283947",
-          "weight": 4.92
+          "value": "49598690",
+          "weight": 4.67
         },
         {
           "code": "NVDA US EQUITY",
           "name": "NVIDIA Corp",
-          "quantity": "156.72",
+          "quantity": "156.12",
           "rank": 5,
-          "value": "49282086",
-          "weight": 4.47
+          "value": "49113010",
+          "weight": 4.62
         },
         {
           "code": "SNOW US EQUITY",
           "name": "Snowflake Inc   - CL A",
-          "quantity": "112.37",
+          "quantity": "111.94",
           "rank": 6,
-          "value": "46036653",
-          "weight": 4.17
-        },
-        {
-          "code": "TSLA US EQUITY",
-          "name": "TESLA MOTORS",
-          "quantity": "64.14",
-          "rank": 7,
-          "value": "37727689",
-          "weight": 3.42
+          "value": "45053202",
+          "weight": 4.24
         },
         {
           "code": "AMZN US EQUITY",
           "name": "Amazon.com Inc",
-          "quantity": "102.11",
+          "quantity": "101.72",
+          "rank": 7,
+          "value": "38393479",
+          "weight": 3.61
+        },
+        {
+          "code": "TSLA US EQUITY",
+          "name": "TESLA MOTORS",
+          "quantity": "63.9",
           "rank": 8,
-          "value": "37520156",
-          "weight": 3.4
-        },
-        {
-          "code": "WDC US EQUITY",
-          "name": "WESTERN DIGITAL",
-          "quantity": "43.45",
-          "rank": 9,
-          "value": "36339894",
-          "weight": 3.29
-        },
-        {
-          "code": "STX US EQUITY",
-          "name": "SEAGATE TECHNOLOGY",
-          "quantity": "26.96",
-          "rank": 10,
-          "value": "35156564",
-          "weight": 3.19
+          "value": "37314953",
+          "weight": 3.51
         },
         {
           "code": "GOOGL US EQUITY",
           "name": "ALPHABET INC-CL A",
-          "quantity": "65.02",
-          "rank": 11,
-          "value": "34705367",
-          "weight": 3.15
+          "quantity": "64.77",
+          "rank": 9,
+          "value": "35565852",
+          "weight": 3.35
         },
         {
-          "code": "LRCX US EQUITY",
-          "name": "LAM RESEARCH",
-          "quantity": "64.93",
-          "rank": 12,
-          "value": "33364583",
-          "weight": 3.02
+          "code": "STX US EQUITY",
+          "name": "SEAGATE TECHNOLOGY",
+          "quantity": "26.85",
+          "rank": 10,
+          "value": "32923881",
+          "weight": 3.1
+        },
+        {
+          "code": "WDC US EQUITY",
+          "name": "WESTERN DIGITAL",
+          "quantity": "43.28",
+          "rank": 11,
+          "value": "32922608",
+          "weight": 3.1
         },
         {
           "code": "BE US EQUITY",
           "name": "BLOOM ENERGY CORPORATION",
-          "quantity": "92.04",
+          "quantity": "91.68",
+          "rank": 12,
+          "value": "32489388",
+          "weight": 3.06
+        },
+        {
+          "code": "LRCX US EQUITY",
+          "name": "LAM RESEARCH",
+          "quantity": "64.68",
           "rank": 13,
-          "value": "33261045",
-          "weight": 3.01
+          "value": "32118184",
+          "weight": 3.02
         },
         {
           "code": "AMAT US EQUITY",
           "name": "APPLIED MATERIALS INC",
-          "quantity": "36.69",
+          "quantity": "36.55",
           "rank": 14,
-          "value": "32449949",
-          "weight": 2.94
+          "value": "31352157",
+          "weight": 2.95
         },
         {
           "code": "ARM US EQUITY",
           "name": "ARM Holdings PLC",
-          "quantity": "73.68",
+          "quantity": "73.4",
           "rank": 15,
-          "value": "30757944",
-          "weight": 2.79
-        },
-        {
-          "code": "MRVL US EQUITY",
-          "name": "MARVELL TECHNOLOGY INC",
-          "quantity": "88.05",
-          "rank": 16,
-          "value": "29079099",
-          "weight": 2.64
+          "value": "30100283",
+          "weight": 2.83
         },
         {
           "code": "DDOG US EQUITY",
           "name": "DATADOG INC - CLASS A",
-          "quantity": "71.45",
+          "quantity": "71.18",
+          "rank": 16,
+          "value": "27867438",
+          "weight": 2.62
+        },
+        {
+          "code": "MRVL US EQUITY",
+          "name": "MARVELL TECHNOLOGY INC",
+          "quantity": "87.71",
           "rank": 17,
-          "value": "28719529",
-          "weight": 2.6
+          "value": "26782012",
+          "weight": 2.52
         },
         {
           "code": "AVGO US EQUITY",
           "name": "BROADCOM LTD",
-          "quantity": "44.89",
+          "quantity": "44.72",
           "rank": 18,
-          "value": "25933474",
-          "weight": 2.35
-        },
-        {
-          "code": "DELL US EQUITY",
-          "name": "Dell Technologies Inc",
-          "quantity": "37.21",
-          "rank": 19,
-          "value": "25277111",
-          "weight": 2.29
-        },
-        {
-          "code": "SKHY US EQUITY",
-          "name": "SK hynix Inc",
-          "quantity": "87.31",
-          "rank": 20,
-          "value": "25137686",
-          "weight": 2.28
+          "value": "26102711",
+          "weight": 2.46
         },
         {
           "code": "AAPL US EQUITY",
           "name": "APPLE Inc",
-          "quantity": "52.88",
-          "rank": 21,
-          "value": "24719953",
-          "weight": 2.24
+          "quantity": "52.68",
+          "rank": 19,
+          "value": "25540897",
+          "weight": 2.4
         },
         {
           "code": "MSFT US EQUITY",
           "name": "MICROSOFT",
-          "quantity": "38.99",
-          "rank": 22,
-          "value": "22283002",
-          "weight": 2.02
+          "quantity": "38.84",
+          "rank": 20,
+          "value": "22748224",
+          "weight": 2.14
         },
         {
-          "code": "LITE US EQUITY",
-          "name": "Lumentum Holdings Inc",
-          "quantity": "18.25",
-          "rank": 23,
-          "value": "22077637",
-          "weight": 2.0
+          "code": "SKHY US EQUITY",
+          "name": "SK hynix Inc",
+          "quantity": "86.97",
+          "rank": 21,
+          "value": "22719293",
+          "weight": 2.14
+        },
+        {
+          "code": "DELL US EQUITY",
+          "name": "Dell Technologies Inc",
+          "quantity": "37.07",
+          "rank": 22,
+          "value": "22647229",
+          "weight": 2.13
         },
         {
           "code": "SPCX US EQUITY",
           "name": "Space Exploration Technologies Corp",
-          "quantity": "108.97",
+          "quantity": "103.58",
+          "rank": 23,
+          "value": "20742279",
+          "weight": 1.95
+        },
+        {
+          "code": "LITE US EQUITY",
+          "name": "Lumentum Holdings Inc",
+          "quantity": "18.18",
           "rank": 24,
-          "value": "22016078",
-          "weight": 2.0
+          "value": "20239081",
+          "weight": 1.9
         },
         {
           "code": "AAOI US EQUITY",
           "name": "Applied Optoelectronics Inc",
-          "quantity": "109.5",
+          "quantity": "109.08",
           "rank": 25,
-          "value": "20394989",
-          "weight": 1.85
+          "value": "17616074",
+          "weight": 1.66
         },
         {
           "code": "META US EQUITY",
           "name": "Meta Platforms Inc-CL A",
-          "quantity": "17.2",
+          "quantity": "17.13",
           "rank": 26,
-          "value": "16880872",
-          "weight": 1.53
+          "value": "17277511",
+          "weight": 1.63
         },
         {
           "code": "ILMN US EQUITY",
           "name": "ILLUMINA INC",
-          "quantity": "58.74",
+          "quantity": "58.52",
           "rank": 27,
-          "value": "16674796",
-          "weight": 1.51
-        },
-        {
-          "code": "GLW US EQUITY",
-          "name": "CORNING INC",
-          "quantity": "49.83",
-          "rank": 28,
-          "value": "13882095",
-          "weight": 1.26
+          "value": "16213367",
+          "weight": 1.53
         },
         {
           "code": "ASML US EQUITY",
           "name": "ASML HOLDING",
-          "quantity": "5.24",
-          "rank": 29,
-          "value": "13814173",
-          "weight": 1.25
+          "quantity": "5.22",
+          "rank": 28,
+          "value": "14027840",
+          "weight": 1.32
         },
         {
           "code": "HOOD US EQUITY",
           "name": "Robinhood Markets Inc",
-          "quantity": "76.76",
+          "quantity": "76.47",
+          "rank": 29,
+          "value": "13079842",
+          "weight": 1.23
+        },
+        {
+          "code": "GLW US EQUITY",
+          "name": "CORNING INC",
+          "quantity": "49.64",
           "rank": 30,
-          "value": "12929394",
-          "weight": 1.17
+          "value": "12816877",
+          "weight": 1.21
         },
         {
           "code": "NTRA US EQUITY",
           "name": "Natera Inc",
-          "quantity": "27.03",
+          "quantity": "26.93",
           "rank": 31,
-          "value": "10942238",
-          "weight": 0.99
+          "value": "11057957",
+          "weight": 1.04
         },
         {
           "code": "CRS US EQUITY",
           "name": "Carpenter Technology Corp",
-          "quantity": "12.17",
+          "quantity": "12.12",
           "rank": 32,
-          "value": "10423348",
-          "weight": 0.94
+          "value": "10354586",
+          "weight": 0.97
         },
         {
           "code": "KLAC US EQUITY",
           "name": "KLA Corp",
-          "quantity": "29.69",
+          "quantity": "29.58",
           "rank": 33,
-          "value": "10154880",
-          "weight": 0.92
+          "value": "9830907",
+          "weight": 0.93
         },
         {
           "code": "CSCO US EQUITY",
           "name": "CISCO SYSTEMS INC",
-          "quantity": "56.44",
+          "quantity": "56.22",
           "rank": 34,
-          "value": "9811728",
-          "weight": 0.89
+          "value": "9302403",
+          "weight": 0.88
         },
         {
           "code": "CRDO US EQUITY",
           "name": "Credo Technology Group Holding Ltd",
-          "quantity": "27.43",
+          "quantity": "27.32",
           "rank": 35,
-          "value": "9618506",
-          "weight": 0.87
+          "value": "9170392",
+          "weight": 0.86
         },
         {
           "code": "TER US EQUITY",
           "name": "TERADYNE INC",
-          "quantity": "17.79",
+          "quantity": "17.72",
           "rank": 36,
-          "value": "9329797",
-          "weight": 0.85
+          "value": "8974727",
+          "weight": 0.84
         },
         {
           "code": "NBIS US EQUITY",
           "name": "YANDEX NV-A",
-          "quantity": "26.6",
+          "quantity": "26.5",
           "rank": 37,
-          "value": "7665200",
-          "weight": 0.69
+          "value": "7826897",
+          "weight": 0.74
         },
         {
           "code": "PLTR US EQUITY",
           "name": "Palantir Technologies Inc -A",
-          "quantity": "34.31",
+          "quantity": "34.17",
           "rank": 38,
-          "value": "6811704",
-          "weight": 0.62
+          "value": "6766285",
+          "weight": 0.64
         },
         {
           "code": "TXN US EQUITY",
           "name": "TEXAS INSTRUMENTS",
-          "quantity": "14.59",
+          "quantity": "14.53",
           "rank": 39,
-          "value": "6618754",
-          "weight": 0.6
+          "value": "6478660",
+          "weight": 0.61
         },
         {
           "code": "CRWD US EQUITY",
           "name": "CROWDSTRIKE HOLDINGS INC - A",
-          "quantity": "17.87",
+          "quantity": "17.8",
           "rank": 40,
-          "value": "5591001",
+          "value": "5448621",
           "weight": 0.51
-        },
-        {
-          "code": "SIMO US EQUITY",
-          "name": "Silicon Motion Technology Corp",
-          "quantity": "11.13",
-          "rank": 41,
-          "value": "5096386",
-          "weight": 0.46
         },
         {
           "code": "VRT US EQUITY",
           "name": "Vertiv Holdings Co",
-          "quantity": "11.01",
+          "quantity": "10.97",
+          "rank": 41,
+          "value": "4946213",
+          "weight": 0.47
+        },
+        {
+          "code": "SIMO US EQUITY",
+          "name": "Silicon Motion Technology Corp",
+          "quantity": "11.09",
           "rank": 42,
-          "value": "4962484",
+          "value": "4816934",
           "weight": 0.45
         },
         {
           "code": "ADI US EQUITY",
           "name": "ANALOG DEVICES",
-          "quantity": "7.79",
+          "quantity": "7.76",
           "rank": 43,
-          "value": "4542473",
-          "weight": 0.41
+          "value": "4491310",
+          "weight": 0.42
         },
         {
           "code": "QCOM US EQUITY",
           "name": "QUALCOMM Inc",
-          "quantity": "17.14",
+          "quantity": "17.07",
           "rank": 44,
-          "value": "4532245",
-          "weight": 0.41
+          "value": "4497630",
+          "weight": 0.42
         },
         {
           "code": "GILD US EQUITY",
           "name": "GILEAD SCIENCES INC",
-          "quantity": "21.99",
+          "quantity": "21.91",
           "rank": 45,
-          "value": "4245617",
-          "weight": 0.38
+          "value": "4271763",
+          "weight": 0.4
         },
         {
           "code": "COIN US EQUITY",
           "name": "COINBASE GLOBAL INC -CLASS A",
-          "quantity": "16.18",
+          "quantity": "16.12",
           "rank": 46,
-          "value": "3879625",
-          "weight": 0.35
+          "value": "3990307",
+          "weight": 0.38
         },
         {
           "code": "FTNT US EQUITY",
           "name": "FORTINET INC",
-          "quantity": "13.8",
+          "quantity": "13.75",
           "rank": 47,
-          "value": "3418156",
-          "weight": 0.31
+          "value": "3348683",
+          "weight": 0.32
         },
         {
           "code": "PANW US EQUITY",
           "name": "PALO ALTO NETWORKS INC",
-          "quantity": "6.4",
+          "quantity": "6.37",
           "rank": 48,
-          "value": "3353189",
-          "weight": 0.3
+          "value": "3338460",
+          "weight": 0.31
         },
         {
           "code": "ALAB US EQUITY",
           "name": "Astera Labs Inc",
-          "quantity": "3.43",
+          "quantity": "3.41",
           "rank": 49,
-          "value": "1842372",
+          "value": "1769987",
           "weight": 0.17
         },
         {
           "code": "MPWR US EQUITY",
           "name": "MONOLITHIC POWER SYSTEMS INC",
-          "quantity": "0.87",
+          "quantity": "0.86",
           "rank": 50,
-          "value": "1777893",
+          "value": "1722130",
           "weight": 0.16
         },
         {
           "code": "NXPI US EQUITY",
           "name": "NXP SEMICONDUCTORS NV",
-          "quantity": "3.46",
+          "quantity": "3.45",
           "rank": 51,
-          "value": "1458257",
+          "value": "1425010",
           "weight": 0.13
         },
         {
           "code": "FLEX US EQUITY",
           "name": "Flextronics International Ltd",
-          "quantity": "5.19",
+          "quantity": "5.17",
           "rank": 52,
-          "value": "1018987",
+          "value": "985180",
           "weight": 0.09
         },
         {
           "code": "MCHP US EQUITY",
           "name": "MICROCHIP TECHNOLOGY INC",
-          "quantity": "7.79",
+          "quantity": "7.76",
           "rank": 53,
-          "value": "1007497",
+          "value": "990946",
           "weight": 0.09
         },
         {
           "code": "GFS US EQUITY",
           "name": "GLOBALFOUNDRIES Inc",
-          "quantity": "9.42",
+          "quantity": "9.39",
           "rank": 54,
-          "value": "886564",
+          "value": "853657",
           "weight": 0.08
         },
         {
           "code": "CRWV US EQUITY",
           "name": "Coreweave Inc",
-          "quantity": "6.06",
+          "quantity": "6.04",
           "rank": 55,
-          "value": "719242",
-          "weight": 0.07
+          "value": "689577",
+          "weight": 0.06
         },
         {
           "code": "KRD010010001",
           "name": "원화현금",
-          "quantity": "487051",
+          "quantity": "5426595",
           "rank": 56,
-          "value": "487051",
+          "value": "5426595",
           "weight": 0.0
         }
       ],
       "issuer": "KoAct",
       "name": "KoAct 미국나스닥성장기업액티브",
-      "source_hash": "b83cef988c133b23",
-      "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFQ1&gijunYMD=20260716",
+      "source_hash": "7f3c507b498ca9c5",
+      "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFQ1&gijunYMD=20260720",
       "ticker": "0015B0"
     },
     "0193G0": {
-      "disclosure_date": "2026-07-16",
+      "disclosure_date": "2026-07-20",
       "holdings": [
         {
           "code": "005930",
           "name": "삼성전자",
           "quantity": "505",
           "rank": 1,
-          "value": "141147500",
-          "weight": 30.79
+          "value": "128775000",
+          "weight": 30.19
         },
         {
           "code": "000660",
           "name": "SK하이닉스",
           "quantity": "55",
           "rank": 2,
-          "value": "114510000",
-          "weight": 24.98
+          "value": "101310000",
+          "weight": 23.75
         },
         {
           "code": "402340",
           "name": "SK스퀘어",
           "quantity": "17",
           "rank": 3,
-          "value": "23494000",
-          "weight": 5.12
+          "value": "20604000",
+          "weight": 4.83
         },
         {
           "code": "105560",
           "name": "KB금융",
           "quantity": "96",
           "rank": 4,
-          "value": "17433600",
-          "weight": 3.8
-        },
-        {
-          "code": "009150",
-          "name": "삼성전기",
-          "quantity": "8",
-          "rank": 5,
-          "value": "11304000",
-          "weight": 2.47
+          "value": "17385600",
+          "weight": 4.08
         },
         {
           "code": "373220",
           "name": "LG에너지솔루션",
           "quantity": "33",
+          "rank": 5,
+          "value": "11022000",
+          "weight": 2.58
+        },
+        {
+          "code": "009150",
+          "name": "삼성전기",
+          "quantity": "8",
           "rank": 6,
-          "value": "11055000",
-          "weight": 2.41
+          "value": "10216000",
+          "weight": 2.4
         },
         {
           "code": "329180",
           "name": "HD현대중공업",
           "quantity": "18",
           "rank": 7,
-          "value": "8478000",
-          "weight": 1.85
+          "value": "8712000",
+          "weight": 2.04
         },
         {
           "code": "005380",
           "name": "현대차",
           "quantity": "17",
           "rank": 8,
-          "value": "7378000",
-          "weight": 1.61
-        },
-        {
-          "code": "352820",
-          "name": "하이브",
-          "quantity": "32",
-          "rank": 9,
-          "value": "6656000",
-          "weight": 1.45
+          "value": "7225000",
+          "weight": 1.69
         },
         {
           "code": "278470",
           "name": "에이피알",
           "quantity": "17",
-          "rank": 10,
-          "value": "6553500",
-          "weight": 1.43
+          "rank": 9,
+          "value": "6681000",
+          "weight": 1.57
         },
         {
-          "code": "034730",
-          "name": "SK",
-          "quantity": "10",
-          "rank": 11,
-          "value": "6090000",
-          "weight": 1.33
+          "code": "352820",
+          "name": "하이브",
+          "quantity": "32",
+          "rank": 10,
+          "value": "6672000",
+          "weight": 1.56
         },
         {
           "code": "267270",
           "name": "HD건설기계",
           "quantity": "46",
-          "rank": 12,
-          "value": "5957000",
-          "weight": 1.3
+          "rank": 11,
+          "value": "5993800",
+          "weight": 1.41
         },
         {
-          "code": "298040",
-          "name": "효성중공업",
-          "quantity": "2",
-          "rank": 13,
-          "value": "5736000",
-          "weight": 1.25
+          "code": "034730",
+          "name": "SK",
+          "quantity": "10",
+          "rank": 12,
+          "value": "5800000",
+          "weight": 1.36
         },
         {
           "code": "012450",
           "name": "한화에어로스페이스",
           "quantity": "6",
-          "rank": 14,
-          "value": "5574000",
-          "weight": 1.22
+          "rank": 13,
+          "value": "5658000",
+          "weight": 1.33
         },
         {
-          "code": "034020",
-          "name": "두산에너빌리티",
-          "quantity": "75",
-          "rank": 15,
-          "value": "5475000",
-          "weight": 1.19
+          "code": "298040",
+          "name": "효성중공업",
+          "quantity": "2",
+          "rank": 14,
+          "value": "5578000",
+          "weight": 1.31
         },
         {
           "code": "032830",
           "name": "삼성생명",
           "quantity": "16",
+          "rank": 15,
+          "value": "5296000",
+          "weight": 1.24
+        },
+        {
+          "code": "034020",
+          "name": "두산에너빌리티",
+          "quantity": "75",
           "rank": 16,
-          "value": "5400000",
-          "weight": 1.18
+          "value": "5227500",
+          "weight": 1.23
         },
         {
           "code": "006260",
           "name": "LS",
           "quantity": "17",
           "rank": 17,
-          "value": "5185000",
-          "weight": 1.13
+          "value": "4896000",
+          "weight": 1.15
         },
         {
           "code": "023530",
           "name": "롯데쇼핑",
           "quantity": "34",
           "rank": 18,
-          "value": "5018400",
-          "weight": 1.09
-        },
-        {
-          "code": "004170",
-          "name": "신세계",
-          "quantity": "8",
-          "rank": 19,
-          "value": "4880000",
-          "weight": 1.06
+          "value": "4787200",
+          "weight": 1.12
         },
         {
           "code": "011070",
           "name": "LG이노텍",
           "quantity": "7",
+          "rank": 19,
+          "value": "4676000",
+          "weight": 1.1
+        },
+        {
+          "code": "004170",
+          "name": "신세계",
+          "quantity": "8",
           "rank": 20,
-          "value": "4816000",
-          "weight": 1.05
+          "value": "4712000",
+          "weight": 1.1
         },
         {
           "code": "028260",
           "name": "삼성물산",
           "quantity": "13",
           "rank": 21,
-          "value": "4771000",
-          "weight": 1.04
+          "value": "4498000",
+          "weight": 1.05
         },
         {
           "code": "062040",
           "name": "산일전기",
           "quantity": "25",
           "rank": 22,
-          "value": "4480000",
-          "weight": 0.98
+          "value": "4250000",
+          "weight": 1.0
         },
         {
           "code": "005830",
           "name": "DB손해보험",
           "quantity": "26",
           "rank": 23,
-          "value": "4225000",
-          "weight": 0.92
+          "value": "4238000",
+          "weight": 0.99
         },
         {
           "code": "267260",
           "name": "HD현대일렉트릭",
           "quantity": "5",
           "rank": 24,
-          "value": "4115000",
-          "weight": 0.9
-        },
-        {
-          "code": "012330",
-          "name": "현대모비스",
-          "quantity": "8",
-          "rank": 25,
-          "value": "3916000",
-          "weight": 0.85
-        },
-        {
-          "code": "000150",
-          "name": "두산",
-          "quantity": "3",
-          "rank": 26,
-          "value": "3867000",
-          "weight": 0.84
+          "value": "3985000",
+          "weight": 0.93
         },
         {
           "code": "042660",
           "name": "한화오션",
           "quantity": "45",
+          "rank": 25,
+          "value": "3901500",
+          "weight": 0.91
+        },
+        {
+          "code": "012330",
+          "name": "현대모비스",
+          "quantity": "8",
+          "rank": 26,
+          "value": "3856000",
+          "weight": 0.9
+        },
+        {
+          "code": "000150",
+          "name": "두산",
+          "quantity": "3",
           "rank": 27,
-          "value": "3690000",
-          "weight": 0.8
+          "value": "3606000",
+          "weight": 0.85
         },
         {
           "code": "006800",
           "name": "미래에셋증권",
           "quantity": "82",
           "rank": 28,
-          "value": "3423500",
-          "weight": 0.75
+          "value": "3284100",
+          "weight": 0.77
         },
         {
           "code": "071050",
           "name": "한국금융지주",
           "quantity": "14",
           "rank": 29,
-          "value": "3290000",
-          "weight": 0.72
+          "value": "3206000",
+          "weight": 0.75
         },
         {
           "code": "267250",
           "name": "HD현대",
           "quantity": "15",
           "rank": 30,
-          "value": "3007500",
-          "weight": 0.66
+          "value": "3067500",
+          "weight": 0.72
         },
         {
           "code": "017670",
           "name": "SK텔레콤",
           "quantity": "34",
           "rank": 31,
-          "value": "2890000",
-          "weight": 0.63
-        },
-        {
-          "code": "086280",
-          "name": "현대글로비스",
-          "quantity": "15",
-          "rank": 32,
-          "value": "2868000",
-          "weight": 0.63
+          "value": "3049800",
+          "weight": 0.72
         },
         {
           "code": "035420",
           "name": "NAVER",
           "quantity": "15",
+          "rank": 32,
+          "value": "2850000",
+          "weight": 0.67
+        },
+        {
+          "code": "086280",
+          "name": "현대글로비스",
+          "quantity": "15",
           "rank": 33,
-          "value": "2844000",
-          "weight": 0.62
+          "value": "2829000",
+          "weight": 0.66
         },
         {
           "code": "039490",
           "name": "키움증권",
           "quantity": "8",
           "rank": 34,
-          "value": "2648000",
-          "weight": 0.58
+          "value": "2576000",
+          "weight": 0.6
         },
         {
           "code": "000720",
           "name": "현대건설",
           "quantity": "25",
           "rank": 35,
-          "value": "2535000",
-          "weight": 0.55
+          "value": "2475000",
+          "weight": 0.58
         },
         {
           "code": "005490",
           "name": "POSCO홀딩스",
           "quantity": "6",
           "rank": 36,
-          "value": "1887000",
-          "weight": 0.41
+          "value": "1869000",
+          "weight": 0.44
         },
         {
           "code": "010060",
           "name": "OCI홀딩스",
           "quantity": "9",
           "rank": 37,
-          "value": "1831500",
-          "weight": 0.4
+          "value": "1748700",
+          "weight": 0.41
         },
         {
           "code": "KRD010010001",
           "name": "원화예금",
-          "quantity": "-2727844",
+          "quantity": "-2403719",
           "rank": 38,
-          "value": "-2727844",
+          "value": "-2403719",
           "weight": 0.0
         }
       ],
       "issuer": "KoAct",
       "name": "KOACT 코스피액티브",
-      "source_hash": "74359f762abc9091",
-      "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFV2&gijunYMD=20260716",
+      "source_hash": "ef040efbbb44394a",
+      "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFV2&gijunYMD=20260720",
       "ticker": "0193G0"
     },
     "385720": {
-      "disclosure_date": "2026-07-16",
+      "disclosure_date": "2026-07-20",
       "holdings": [
         {
           "code": "000660",
           "name": "SK하이닉스",
           "quantity": "340",
           "rank": 1,
-          "value": "707,880,000",
-          "weight": 25.72
+          "value": "626,280,000",
+          "weight": 24.25
         },
         {
           "code": "005930",
           "name": "삼성전자",
-          "quantity": "2,280",
+          "quantity": "2,201",
           "rank": 2,
-          "value": "637,260,000",
-          "weight": 23.16
+          "value": "561,255,000",
+          "weight": 21.74
         },
         {
           "code": "003230",
           "name": "삼양식품",
           "quantity": "110",
           "rank": 3,
-          "value": "117,920,000",
-          "weight": 4.29
-        },
-        {
-          "code": "402340",
-          "name": "SK스퀘어",
-          "quantity": "80",
-          "rank": 4,
-          "value": "110,560,000",
-          "weight": 4.02
+          "value": "117,590,000",
+          "weight": 4.55
         },
         {
           "code": "105560",
           "name": "KB금융",
           "quantity": "590",
-          "rank": 5,
-          "value": "107,144,000",
-          "weight": 3.89
-        },
-        {
-          "code": "006400",
-          "name": "삼성SDI",
-          "quantity": "213",
-          "rank": 6,
-          "value": "96,702,000",
-          "weight": 3.51
+          "rank": 4,
+          "value": "106,849,000",
+          "weight": 4.14
         },
         {
           "code": "278470",
           "name": "에이피알",
           "quantity": "248",
+          "rank": 5,
+          "value": "97,464,000",
+          "weight": 3.77
+        },
+        {
+          "code": "402340",
+          "name": "SK스퀘어",
+          "quantity": "80",
+          "rank": 6,
+          "value": "96,960,000",
+          "weight": 3.76
+        },
+        {
+          "code": "006400",
+          "name": "삼성SDI",
+          "quantity": "213",
           "rank": 7,
-          "value": "95,604,000",
-          "weight": 3.47
+          "value": "92,548,500",
+          "weight": 3.58
         },
         {
           "code": "000150",
           "name": "두산",
           "quantity": "53",
           "rank": 8,
-          "value": "68,317,000",
-          "weight": 2.48
+          "value": "63,706,000",
+          "weight": 2.47
         },
         {
           "code": "004170",
           "name": "신세계",
           "quantity": "100",
           "rank": 9,
-          "value": "61,000,000",
-          "weight": 2.22
+          "value": "58,900,000",
+          "weight": 2.28
         },
         {
           "code": "034730",
           "name": "SK",
           "quantity": "100",
           "rank": 10,
-          "value": "60,900,000",
-          "weight": 2.21
+          "value": "58,000,000",
+          "weight": 2.25
         },
         {
           "code": "071050",
           "name": "한국금융지주",
-          "quantity": "250",
+          "quantity": "249",
           "rank": 11,
-          "value": "58,750,000",
-          "weight": 2.14
+          "value": "57,021,000",
+          "weight": 2.21
         },
         {
           "code": "009150",
           "name": "삼성전기",
           "quantity": "37",
           "rank": 12,
-          "value": "52,281,000",
-          "weight": 1.9
+          "value": "47,249,000",
+          "weight": 1.83
         },
         {
           "code": "373220",
           "name": "LG에너지솔루션",
           "quantity": "140",
           "rank": 13,
-          "value": "46,900,000",
-          "weight": 1.7
+          "value": "46,760,000",
+          "weight": 1.81
         },
         {
           "code": "016360",
           "name": "삼성증권",
           "quantity": "401",
           "rank": 14,
-          "value": "44,551,100",
-          "weight": 1.62
-        },
-        {
-          "code": "039490",
-          "name": "키움증권",
-          "quantity": "110",
-          "rank": 15,
-          "value": "36,410,000",
-          "weight": 1.32
+          "value": "43,187,700",
+          "weight": 1.67
         },
         {
           "code": "055550",
           "name": "신한지주",
           "quantity": "329",
+          "rank": 15,
+          "value": "35,499,100",
+          "weight": 1.38
+        },
+        {
+          "code": "039490",
+          "name": "키움증권",
+          "quantity": "110",
           "rank": 16,
-          "value": "35,301,700",
-          "weight": 1.28
+          "value": "35,420,000",
+          "weight": 1.37
         },
         {
           "code": "000810",
           "name": "삼성화재",
           "quantity": "50",
           "rank": 17,
-          "value": "33,050,000",
-          "weight": 1.2
+          "value": "35,050,000",
+          "weight": 1.36
         },
         {
           "code": "069960",
           "name": "현대백화점",
           "quantity": "206",
           "rank": 18,
-          "value": "32,774,600",
-          "weight": 1.19
-        },
-        {
-          "code": "005490",
-          "name": "POSCO홀딩스",
-          "quantity": "100",
-          "rank": 19,
-          "value": "31,450,000",
-          "weight": 1.14
-        },
-        {
-          "code": "005940",
-          "name": "NH투자증권",
-          "quantity": "992",
-          "rank": 20,
-          "value": "30,851,200",
-          "weight": 1.12
+          "value": "32,424,400",
+          "weight": 1.26
         },
         {
           "code": "017670",
           "name": "SK텔레콤",
           "quantity": "351",
+          "rank": 19,
+          "value": "31,484,700",
+          "weight": 1.22
+        },
+        {
+          "code": "005490",
+          "name": "POSCO홀딩스",
+          "quantity": "100",
+          "rank": 20,
+          "value": "31,150,000",
+          "weight": 1.21
+        },
+        {
+          "code": "005940",
+          "name": "NH투자증권",
+          "quantity": "992",
           "rank": 21,
-          "value": "29,835,000",
-          "weight": 1.08
+          "value": "30,752,000",
+          "weight": 1.19
         },
         {
           "code": "161890",
           "name": "한국콜마",
           "quantity": "267",
           "rank": 22,
-          "value": "28,622,400",
-          "weight": 1.04
+          "value": "28,729,200",
+          "weight": 1.11
         },
         {
           "code": "298040",
           "name": "효성중공업",
           "quantity": "10",
           "rank": 23,
-          "value": "28,680,000",
-          "weight": 1.04
+          "value": "27,890,000",
+          "weight": 1.08
         },
         {
           "code": "005380",
           "name": "현대차",
           "quantity": "65",
           "rank": 24,
-          "value": "28,210,000",
-          "weight": 1.03
+          "value": "27,625,000",
+          "weight": 1.07
         },
         {
           "code": "062040",
           "name": "산일전기",
           "quantity": "150",
           "rank": 25,
-          "value": "26,880,000",
+          "value": "25,500,000",
+          "weight": 0.99
+        },
+        {
+          "code": "033780",
+          "name": "KT&G",
+          "quantity": "140",
+          "rank": 26,
+          "value": "25,186,000",
           "weight": 0.98
         },
         {
           "code": "028260",
           "name": "삼성물산",
           "quantity": "70",
-          "rank": 26,
-          "value": "25,690,000",
-          "weight": 0.93
+          "rank": 27,
+          "value": "24,220,000",
+          "weight": 0.94
         },
         {
           "code": "006260",
           "name": "LS",
           "quantity": "80",
-          "rank": 27,
-          "value": "24,400,000",
+          "rank": 28,
+          "value": "23,040,000",
           "weight": 0.89
         },
         {
-          "code": "033780",
-          "name": "KT&G",
-          "quantity": "140",
-          "rank": 28,
-          "value": "24,150,000",
-          "weight": 0.88
+          "code": "010950",
+          "name": "S-Oil",
+          "quantity": "147",
+          "rank": 29,
+          "value": "21,300,300",
+          "weight": 0.83
         },
         {
           "code": "483650",
           "name": "달바글로벌",
           "quantity": "87",
-          "rank": 29,
-          "value": "17,260,800",
-          "weight": 0.63
+          "rank": 30,
+          "value": "18,139,500",
+          "weight": 0.7
+        },
+        {
+          "code": "",
+          "name": "현금",
+          "quantity": "16,546,158",
+          "rank": 31,
+          "value": "16,546,158",
+          "weight": 0.64
         },
         {
           "code": "010120",
           "name": "LS ELECTRIC",
           "quantity": "80",
-          "rank": 30,
-          "value": "16,120,000",
+          "rank": 32,
+          "value": "15,200,000",
           "weight": 0.59
         },
         {
           "code": "012450",
           "name": "한화에어로스페이스",
           "quantity": "16",
-          "rank": 31,
-          "value": "14,864,000",
-          "weight": 0.54
-        },
-        {
-          "code": "",
-          "name": "현금",
-          "quantity": "13,220,139",
-          "rank": 32,
-          "value": "13,220,139",
-          "weight": 0.48
+          "rank": 33,
+          "value": "15,088,000",
+          "weight": 0.58
         },
         {
           "code": "066970",
           "name": "엘앤에프",
           "quantity": "90",
-          "rank": 33,
-          "value": "8,559,000",
-          "weight": 0.31
+          "rank": 34,
+          "value": "8,280,000",
+          "weight": 0.32
         }
       ],
       "issuer": "TIME",
       "name": "TIME 코스피액티브",
-      "source_hash": "2788aae53ea869d8",
+      "source_hash": "026633fe551b1cda",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=11&",
       "ticker": "385720"
     },
     "426030": {
-      "disclosure_date": "2026-07-16",
+      "disclosure_date": "2026-07-20",
       "holdings": [
+        {
+          "code": "NVDA US EQUITY",
+          "name": "NVIDIA Corp",
+          "quantity": "240",
+          "rank": 1,
+          "value": "75,500,400",
+          "weight": 7.47
+        },
         {
           "code": "SNDK US EQUITY",
           "name": "Sandisk Corp",
-          "quantity": "29",
-          "rank": 1,
-          "value": "75,685,225",
-          "weight": 7.22
+          "quantity": "24",
+          "rank": 2,
+          "value": "57,380,304",
+          "weight": 5.68
         },
         {
           "code": "MU US EQUITY",
           "name": "Micron Technology Inc",
-          "quantity": "43",
-          "rank": 2,
-          "value": "62,764,445",
-          "weight": 5.99
+          "quantity": "36",
+          "rank": 3,
+          "value": "48,193,060",
+          "weight": 4.77
         },
         {
           "code": "AMD US EQUITY",
           "name": "Advanced Micro Devices Inc",
-          "quantity": "74",
-          "rank": 3,
-          "value": "60,221,837",
-          "weight": 5.75
-        },
-        {
-          "code": "NVDA US EQUITY",
-          "name": "NVIDIA Corp",
-          "quantity": "177",
+          "quantity": "61",
           "rank": 4,
-          "value": "55,659,324",
-          "weight": 5.31
-        },
-        {
-          "code": "DELL US EQUITY",
-          "name": "Dell Technologies Inc",
-          "quantity": "66",
-          "rank": 5,
-          "value": "44,834,436",
-          "weight": 4.28
+          "value": "47,783,670",
+          "weight": 4.73
         },
         {
           "code": "LRCX US EQUITY",
           "name": "Lam Research Corp",
-          "quantity": "84",
+          "quantity": "83",
+          "rank": 5,
+          "value": "41,215,357",
+          "weight": 4.08
+        },
+        {
+          "code": "HOOD US EQUITY",
+          "name": "Robinhood Markets Inc",
+          "quantity": "234",
           "rank": 6,
-          "value": "43,163,792",
-          "weight": 4.12
+          "value": "40,024,627",
+          "weight": 3.96
         },
         {
           "code": "INTC US EQUITY",
           "name": "Intel Corp",
-          "quantity": "259",
+          "quantity": "257",
           "rank": 7,
-          "value": "41,437,739",
-          "weight": 3.96
+          "value": "39,183,863",
+          "weight": 3.88
         },
         {
           "code": "NQU6 INDEX",
           "name": "NASDAQ 100 E-MINI INDEX SEPT 2026",
           "quantity": "",
           "rank": 8,
-          "value": "35,383,667",
-          "weight": 3.38
+          "value": "35,166,309",
+          "weight": 3.48
         },
         {
-          "code": "STX US EQUITY",
-          "name": "Seagate Technology Holdings PLC",
-          "quantity": "26",
+          "code": "AVGO US EQUITY",
+          "name": "Broadcom Inc",
+          "quantity": "55",
           "rank": 9,
-          "value": "33,904,698",
-          "weight": 3.24
+          "value": "32,103,066",
+          "weight": 3.18
         },
         {
-          "code": "WDC US EQUITY",
-          "name": "Western Digital Corp",
-          "quantity": "40",
+          "code": "GOOGL US EQUITY",
+          "name": "Alphabet Inc",
+          "quantity": "58",
           "rank": 10,
-          "value": "33,454,448",
-          "weight": 3.19
+          "value": "31,848,378",
+          "weight": 3.15
         },
         {
-          "code": "CRDO US EQUITY",
-          "name": "Credo Technology Group Holding Ltd",
-          "quantity": "89",
+          "code": "MSFT US EQUITY",
+          "name": "Microsoft Corp",
+          "quantity": "53",
           "rank": 11,
-          "value": "31,208,423",
-          "weight": 2.98
+          "value": "31,041,604",
+          "weight": 3.07
+        },
+        {
+          "code": "AAPL US EQUITY",
+          "name": "Apple Inc",
+          "quantity": "63",
+          "rank": 12,
+          "value": "30,544,353",
+          "weight": 3.02
         },
         {
           "code": "AMAT US EQUITY",
           "name": "Applied Materials Inc",
           "quantity": "35",
-          "rank": 12,
-          "value": "30,955,252",
-          "weight": 2.95
-        },
-        {
-          "code": "HOOD US EQUITY",
-          "name": "Robinhood Markets Inc",
-          "quantity": "176",
           "rank": 13,
-          "value": "29,645,301",
-          "weight": 2.83
+          "value": "30,022,586",
+          "weight": 2.97
         },
         {
-          "code": "MRVL US EQUITY",
-          "name": "Marvell Technology Inc",
-          "quantity": "87",
+          "code": "DELL US EQUITY",
+          "name": "Dell Technologies Inc",
+          "quantity": "49",
           "rank": 14,
-          "value": "28,732,330",
-          "weight": 2.74
+          "value": "29,935,642",
+          "weight": 2.96
+        },
+        {
+          "code": "CRDO US EQUITY",
+          "name": "Credo Technology Group Holding Ltd",
+          "quantity": "88",
+          "rank": 15,
+          "value": "29,538,598",
+          "weight": 2.92
+        },
+        {
+          "code": "COIN US EQUITY",
+          "name": "Coinbase Global Inc",
+          "quantity": "97",
+          "rank": 16,
+          "value": "24,011,155",
+          "weight": 2.38
+        },
+        {
+          "code": "META US EQUITY",
+          "name": "Meta Platforms Inc",
+          "quantity": "22",
+          "rank": 17,
+          "value": "22,189,449",
+          "weight": 2.2
+        },
+        {
+          "code": "STX US EQUITY",
+          "name": "Seagate Technology Holdings PLC",
+          "quantity": "18",
+          "rank": 18,
+          "value": "22,071,875",
+          "weight": 2.18
         },
         {
           "code": "SKHY US EQUITY",
           "name": "SK hynix Inc",
-          "quantity": "83",
-          "rank": 15,
-          "value": "23,896,780",
-          "weight": 2.28
-        },
-        {
-          "code": "AAOI US EQUITY",
-          "name": "Applied Optoelectronics Inc",
-          "quantity": "127",
-          "rank": 16,
-          "value": "23,654,463",
-          "weight": 2.26
-        },
-        {
-          "code": "AVGO US EQUITY",
-          "name": "Broadcom Inc",
-          "quantity": "38",
-          "rank": 17,
-          "value": "21,953,041",
-          "weight": 2.1
-        },
-        {
-          "code": "GOOGL US EQUITY",
-          "name": "Alphabet Inc",
-          "quantity": "40",
-          "rank": 18,
-          "value": "21,350,579",
-          "weight": 2.04
-        },
-        {
-          "code": "MSFT US EQUITY",
-          "name": "Microsoft Corp",
-          "quantity": "36",
+          "quantity": "82",
           "rank": 19,
-          "value": "20,574,200",
-          "weight": 1.96
+          "value": "21,420,973",
+          "weight": 2.12
         },
         {
-          "code": "AAPL US EQUITY",
-          "name": "Apple Inc",
-          "quantity": "43",
+          "code": "WDC US EQUITY",
+          "name": "Western Digital Corp",
+          "quantity": "26",
           "rank": 20,
-          "value": "20,101,323",
-          "weight": 1.92
-        },
-        {
-          "code": "",
-          "name": "현금",
-          "quantity": "19,008,755",
-          "rank": 21,
-          "value": "19,008,755",
-          "weight": 1.81
+          "value": "19,777,907",
+          "weight": 1.96
         },
         {
           "code": "AMZN US EQUITY",
           "name": "Amazon.com Inc",
-          "quantity": "51",
-          "rank": 22,
-          "value": "18,739,868",
-          "weight": 1.79
+          "quantity": "50",
+          "rank": 21,
+          "value": "18,872,139",
+          "weight": 1.87
         },
         {
           "code": "TSLA US EQUITY",
           "name": "Tesla Inc",
           "quantity": "30",
-          "rank": 23,
-          "value": "17,646,253",
-          "weight": 1.68
+          "rank": 22,
+          "value": "17,518,757",
+          "weight": 1.73
         },
         {
-          "code": "ARM US EQUITY",
-          "name": "ARM Holdings PLC",
-          "quantity": "40",
-          "rank": 24,
-          "value": "16,698,123",
-          "weight": 1.59
+          "code": "",
+          "name": "현금",
+          "quantity": "17,043,295",
+          "rank": 23,
+          "value": "17,043,295",
+          "weight": 1.69
         },
         {
           "code": "ASML US EQUITY",
           "name": "ASML Holding NV",
           "quantity": "6",
+          "rank": 24,
+          "value": "16,123,954",
+          "weight": 1.6
+        },
+        {
+          "code": "MRVL US EQUITY",
+          "name": "Marvell Technology Inc",
+          "quantity": "53",
           "rank": 25,
-          "value": "15,817,756",
-          "weight": 1.51
+          "value": "16,183,407",
+          "weight": 1.6
+        },
+        {
+          "code": "ARM US EQUITY",
+          "name": "ARM Holdings PLC",
+          "quantity": "39",
+          "rank": 26,
+          "value": "15,993,338",
+          "weight": 1.58
+        },
+        {
+          "code": "AAOI US EQUITY",
+          "name": "Applied Optoelectronics Inc",
+          "quantity": "94",
+          "rank": 27,
+          "value": "15,180,702",
+          "weight": 1.5
+        },
+        {
+          "code": "NBIS US EQUITY",
+          "name": "Nebius Group NV",
+          "quantity": "51",
+          "rank": 28,
+          "value": "15,063,084",
+          "weight": 1.49
         },
         {
           "code": "KLAC US EQUITY",
           "name": "KLA Corp",
           "quantity": "45",
-          "rank": 26,
-          "value": "15,391,365",
-          "weight": 1.47
-        },
-        {
-          "code": "GLW US EQUITY",
-          "name": "Corning Inc",
-          "quantity": "54",
-          "rank": 27,
-          "value": "15,043,811",
-          "weight": 1.44
-        },
-        {
-          "code": "NBIS US EQUITY",
-          "name": "Nebius Group NV",
-          "quantity": "52",
-          "rank": 28,
-          "value": "14,984,601",
-          "weight": 1.43
+          "rank": 29,
+          "value": "14,955,741",
+          "weight": 1.48
         },
         {
           "code": "TER US EQUITY",
           "name": "Teradyne Inc",
           "quantity": "27",
-          "rank": 29,
-          "value": "14,159,895",
+          "rank": 30,
+          "value": "13,674,810",
           "weight": 1.35
         },
         {
           "code": "VRT US EQUITY",
           "name": "Vertiv Holdings Co",
           "quantity": "30",
-          "rank": 30,
-          "value": "13,521,756",
-          "weight": 1.29
-        },
-        {
-          "code": "COIN US EQUITY",
-          "name": "Coinbase Global Inc",
-          "quantity": "56",
           "rank": 31,
-          "value": "13,427,626",
-          "weight": 1.28
+          "value": "13,526,562",
+          "weight": 1.34
         },
         {
           "code": "SIMO US EQUITY",
           "name": "Silicon Motion Technology Corp",
           "quantity": "27",
           "rank": 32,
-          "value": "12,363,200",
-          "weight": 1.18
-        },
-        {
-          "code": "META US EQUITY",
-          "name": "Meta Platforms Inc",
-          "quantity": "12",
-          "rank": 33,
-          "value": "11,777,353",
-          "weight": 1.12
+          "value": "11,727,432",
+          "weight": 1.16
         },
         {
           "code": "ALAB US EQUITY",
           "name": "Astera Labs Inc",
-          "quantity": "21",
-          "rank": 34,
-          "value": "11,279,830",
-          "weight": 1.08
+          "quantity": "20",
+          "rank": 33,
+          "value": "10,381,156",
+          "weight": 1.03
         },
         {
           "code": "LLY US EQUITY",
           "name": "Eli Lilly & Co",
           "quantity": "6",
-          "rank": 35,
-          "value": "10,267,056",
-          "weight": 0.98
+          "rank": 34,
+          "value": "10,273,650",
+          "weight": 1.02
         },
         {
           "code": "SPCX US EQUITY",
           "name": "Space Exploration Technologies Corp",
-          "quantity": "51",
+          "quantity": "50",
+          "rank": 35,
+          "value": "10,012,685",
+          "weight": 0.99
+        },
+        {
+          "code": "APP US EQUITY",
+          "name": "AppLovin Corp",
+          "quantity": "14",
           "rank": 36,
-          "value": "10,303,936",
-          "weight": 0.98
+          "value": "9,383,100",
+          "weight": 0.93
         },
         {
           "code": "GEV US EQUITY",
           "name": "GE Vernova Inc",
           "quantity": "6",
           "rank": 37,
-          "value": "9,496,230",
-          "weight": 0.91
+          "value": "9,373,419",
+          "weight": 0.93
         },
         {
-          "code": "APP US EQUITY",
-          "name": "AppLovin Corp",
-          "quantity": "14",
+          "code": "GLW US EQUITY",
+          "name": "Corning Inc",
+          "quantity": "34",
           "rank": 38,
-          "value": "9,332,408",
-          "weight": 0.89
+          "value": "8,778,683",
+          "weight": 0.87
         },
         {
           "code": "QCOM US EQUITY",
           "name": "QUALCOMM Inc",
-          "quantity": "34",
+          "quantity": "33",
           "rank": 39,
-          "value": "8,990,452",
+          "value": "8,694,892",
+          "weight": 0.86
+        },
+        {
+          "code": "TSM US EQUITY",
+          "name": "Taiwan Semiconductor Manufacturing Co Ltd",
+          "quantity": "14",
+          "rank": 40,
+          "value": "8,693,974",
           "weight": 0.86
         },
         {
           "code": "BE US EQUITY",
           "name": "Bloom Energy Corp",
           "quantity": "24",
-          "rank": 40,
-          "value": "8,673,023",
-          "weight": 0.83
-        },
-        {
-          "code": "TSM US EQUITY",
-          "name": "Taiwan Semiconductor Manufacturing Co Ltd",
-          "quantity": "14",
           "rank": 41,
-          "value": "8,738,142",
-          "weight": 0.83
+          "value": "8,505,075",
+          "weight": 0.84
         },
         {
           "code": "LITE US EQUITY",
           "name": "Lumentum Holdings Inc",
           "quantity": "7",
           "rank": 42,
-          "value": "8,468,134",
-          "weight": 0.81
+          "value": "7,792,825",
+          "weight": 0.77
         },
         {
           "code": "MSTR US EQUITY",
           "name": "Strategy Inc",
           "quantity": "54",
           "rank": 43,
-          "value": "7,823,359",
-          "weight": 0.75
+          "value": "7,791,907",
+          "weight": 0.77
         },
         {
           "code": "RKLB US EQUITY",
           "name": "Rocket Lab Corp",
-          "quantity": "56",
+          "quantity": "55",
           "rank": 44,
-          "value": "6,552,515",
-          "weight": 0.63
+          "value": "6,204,356",
+          "weight": 0.61
         },
         {
           "code": "CRWV US EQUITY",
           "name": "CoreWeave Inc",
           "quantity": "50",
           "rank": 45,
-          "value": "5,934,345",
+          "value": "5,708,422",
           "weight": 0.57
         },
         {
           "code": "ORCL US EQUITY",
           "name": "Oracle Corp",
-          "quantity": "25",
+          "quantity": "24",
           "rank": 46,
-          "value": "4,748,812",
-          "weight": 0.45
+          "value": "4,707,316",
+          "weight": 0.47
         }
       ],
       "issuer": "TIME",
       "name": "TIME 미국나스닥100액티브",
-      "source_hash": "dff0fa5ba79d7d0d",
+      "source_hash": "e38963312614df73",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=2&",
       "ticker": "426030"
     }
   },
-  "updated_at_kst": "2026-07-17T12:32:41.100559+09:00"
+  "updated_at_kst": "2026-07-20T09:09:51.541239+09:00"
 }
