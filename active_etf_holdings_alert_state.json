@@ -1,8 +1,8 @@
 {
-  "last_message_hash": "01951b33549e1e44",
-  "last_message_key": "ce0773e642017581",
+  "last_message_hash": "f996ce69f9e9b361",
+  "last_message_key": "7e32d3d17e329cae",
   "last_messages": {},
-  "last_sent_at_kst": "2026-07-20T09:09:51.541239+09:00",
+  "last_sent_at_kst": "2026-07-20T12:58:05.379930+09:00",
   "last_status": {
     "0015B0": {
       "error": "",
@@ -790,7 +790,7 @@
       ],
       "issuer": "KoAct",
       "name": "KOACT 코스피액티브",
-      "source_hash": "ef040efbbb44394a",
+      "source_hash": "f13a61a609c96898",
       "source_url": "https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFV2&gijunYMD=20260720",
       "ticker": "0193G0"
     },
@@ -1072,7 +1072,7 @@
       ],
       "issuer": "TIME",
       "name": "TIME 코스피액티브",
-      "source_hash": "026633fe551b1cda",
+      "source_hash": "746992d1b56a710a",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=11&",
       "ticker": "385720"
     },
@@ -1450,10 +1450,10 @@
       ],
       "issuer": "TIME",
       "name": "TIME 미국나스닥100액티브",
-      "source_hash": "e38963312614df73",
+      "source_hash": "d99cfa419962d8a1",
       "source_url": "https://timeetf.co.kr/pdf_excel.php?idx=2&",
       "ticker": "426030"
     }
   },
-  "updated_at_kst": "2026-07-20T09:09:51.541239+09:00"
+  "updated_at_kst": "2026-07-20T12:58:05.379930+09:00"
 }
