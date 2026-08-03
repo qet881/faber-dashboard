@@ -117,13 +117,16 @@ def test_buy_hold_zero_weights_fall_back_to_baseline():
     assert result["raw_weight_total"] == 0
 
 
-def test_buy_hold_mode_is_added_without_removing_existing_modes():
+def test_main_menu_hides_buy_hold_and_other_secondary_modes():
     source = APP_SOURCE.read_text(encoding="utf-8")
+    start = source.index("def main")
+    main_source = source[start:]
 
-    assert "1. MAIN" in source
-    assert "2. 전략 백테스트 (시장 분석)" in source
-    assert "3. 몬테카를로 시뮬레이션" in source
-    assert "4. Buy & Hold" in source
+    assert "1. MAIN" in main_source
+    assert "2. 전략 백테스트 (시장 분석)" in main_source
+    assert "3. 몬테카를로 시뮬레이션" not in main_source
+    assert "4. Buy & Hold" not in main_source
+    assert "5. 종목/ETF 분석" not in main_source
     assert "Buy & Hold 샌드박스" not in source
 
 

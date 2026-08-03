@@ -76,34 +76,24 @@ def test_strategy_backtest_primary_path_uses_original_faber_a():
         for symbol in backtest_mode.get_symbols()
         if symbol.is_referenced() and symbol.is_global()
     }
-    source = APP_SOURCE.read_text(encoding="utf-8")
-
-    assert "build_faber_active_nasdaq_kr_active_data" in referenced_globals
-    assert "build_haenam_p_strategy_data" in referenced_globals
-    assert "haenam_p_strategy_data = build_haenam_p_strategy_data" in source
-    assert "primary_nav_df = nav_df" in source
-    assert "primary_strategy_data = all_data" in source
-    assert "primary_label = \"Faber A (원조: 코스피/나스닥 패시브 -5%룰)\"" in source
-    assert "현재 본선은 원조 Faber A(코스피/나스닥 패시브 + -5%룰)입니다." in source
+    assert "simulate_faber_strategy" in referenced_globals
+    assert "simulate_daily_nav_with_attribution" in referenced_globals
+    assert "align_strategies_to_common_dates" in referenced_globals
+    assert "build_haenam_p_strategy_data" not in referenced_globals
+    assert "build_faber_active_nasdaq_kr_active_data" not in referenced_globals
 
 
-def test_strategy_backtest_includes_haenam_p_vix_overlay_candidates():
+def test_strategy_backtest_excludes_unrelated_variant_builders():
     backtest_mode = _function_symbol_table("mode_strategy_backtest")
     referenced_globals = {
         symbol.get_name()
         for symbol in backtest_mode.get_symbols()
         if symbol.is_referenced() and symbol.is_global()
     }
-    source = APP_SOURCE.read_text(encoding="utf-8")
-
-    assert "HAENAM_P_VIX70_LABEL = '해남P+VIX (70%상한)'" in source
-    assert "HAENAM_P_VIX100_LABEL = '해남P+VIX (100%상한)'" in source
-    assert "fetch_vix_data" in referenced_globals
-    assert "simulate_haenam_p_vix_overlay_strategy" in referenced_globals
-    assert "max_equity=0.70" in source
-    assert "max_equity=1.00" in source
-    assert "HAENAM_P_VIX70_LABEL: haenam_p_vix70_nav" in source
-    assert "HAENAM_P_VIX100_LABEL: haenam_p_vix100_nav" in source
+    assert "fetch_vix_data" not in referenced_globals
+    assert "simulate_haenam_p_vix_overlay_strategy" not in referenced_globals
+    assert "build_haenam_v_strategy_data" not in referenced_globals
+    assert "build_haenam_p_local_currency_signal_data" not in referenced_globals
 
 
 def test_vix_overlay_rules_keep_thresholds_and_daily_steps():
@@ -121,25 +111,17 @@ def test_vix_overlay_rules_keep_thresholds_and_daily_steps():
     assert "return 0.01" in source
 
 
-def test_strategy_quant_comparison_includes_haenam_v_variants():
+def test_strategy_quant_comparison_uses_only_original_faber_and_momentum():
     backtest_mode = _function_symbol_table("mode_strategy_backtest")
     referenced_globals = {
         symbol.get_name()
         for symbol in backtest_mode.get_symbols()
         if symbol.is_referenced() and symbol.is_global()
     }
-    source = APP_SOURCE.read_text(encoding="utf-8")
-
-    assert "build_haenam_v_strategy_data" in referenced_globals
-    assert "expand_haenam_v_backtest_weights" in source
-    assert "HAENAM_V_FABER_LABEL = '해남V (-5%룰)'" in source
-    assert "HAENAM_V_MOM_LABEL = '해남V (연속모멘텀)'" in source
-    assert "HAENAM_V_PASSIVE_FABER_LABEL = '해남V 패시브 (-5%룰)'" in source
-    assert "HAENAM_V_PASSIVE_MOM_LABEL = '해남V 패시브 (연속모멘텀)'" in source
-    assert "HAENAM_V_FABER_LABEL: haenam_v_faber_nav" in source
-    assert "HAENAM_V_MOM_LABEL: haenam_v_mom_nav" in source
-    assert "HAENAM_V_PASSIVE_FABER_LABEL: haenam_v_passive_faber_nav" in source
-    assert "HAENAM_V_PASSIVE_MOM_LABEL: haenam_v_passive_mom_nav" in source
+    assert "simulate_faber_strategy" in referenced_globals
+    assert "simulate_daily_nav_with_attribution" in referenced_globals
+    assert "simulate_static_benchmark" not in referenced_globals
+    assert "build_haenam_v_strategy_data" not in referenced_globals
 
 
 def test_strategy_quant_comparison_uses_tr_passive_execution_etfs():
@@ -153,62 +135,43 @@ def test_strategy_quant_comparison_uses_tr_passive_execution_etfs():
     assert "etf_kospi = fetch_etf_data('294400', start_date, end_date)" in source
 
 
-def test_strategy_quant_comparison_shows_haenam_p_faber_and_momentum_only():
+def test_strategy_quant_comparison_shows_faber_a_and_continuous_momentum_only():
     source = APP_SOURCE.read_text(encoding="utf-8")
-    quant_labels_block = re.search(
-        r"quant_labels = \[\s*FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,\s*MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,\s*HAENAM_P_LOCAL_SIGNAL_LABEL,\s*\]",
+    strategy_block = re.search(
+        r"strategy_navs = \{\s*\"Faber A\": faber_nav,\s*\"연속모멘텀\": momentum_nav,\s*\}",
         source,
         flags=re.S,
     )
 
-    assert quant_labels_block is not None
-    block = quant_labels_block.group(0)
-    assert "FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL" in block
-    assert "MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL" in block
-    assert "HAENAM_P_LOCAL_SIGNAL_LABEL" in block
-    assert "FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = '해남P (-5%룰)'" in source
-    assert "HAENAM_P_LABEL = '해남P'" in source
-    assert "HAENAM_P_LOCAL_SIGNAL_LABEL = '해남P (현지통화 신호)'" in source
-    assert "MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL = HAENAM_P_LABEL" in source
-    assert "docs/aggressive_no_bond/nav.csv" not in source
-    assert "Aggressive no-bond" not in source
-    assert "공격형 무채권" not in source
-    assert "docs/haenam_p_us_dividend_replacements/nav.csv" not in source
-    assert "display_quant_strategies" in source
+    assert strategy_block is not None
+    assert "MDD (일별)" in source
+    assert "MDD (월말)" in source
+    assert "CAGR / MDD" in source
 
 
 def test_strategy_quant_comparison_hides_single_stock_variants():
-    source = APP_SOURCE.read_text(encoding="utf-8")
-    quant_labels_block = re.search(
-        r"quant_labels = \[\s*FABER_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,\s*MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL,\s*HAENAM_P_LOCAL_SIGNAL_LABEL,\s*\]",
-        source,
-        flags=re.S,
-    )
+    backtest_mode = _function_symbol_table("mode_strategy_backtest")
+    referenced_globals = {
+        symbol.get_name()
+        for symbol in backtest_mode.get_symbols()
+        if symbol.is_referenced() and symbol.is_global()
+    }
 
-    assert quant_labels_block is not None
-    block = quant_labels_block.group(0)
-    assert "FABER_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL" not in block
-    assert "MOM_ACTIVE_NASDAQ_KR_SAMSUNG_LABEL" not in block
-    assert "MOM_PASSIVE_NASDAQ_KR_SAMSUNG_LABEL" not in block
-    assert "MOM_ACTIVE_NASDAQ_KR_SAMSUNG_SELF_SIGNAL_LABEL" not in block
-    assert "FABER_ACTIVE_NASDAQ_KR_HYNIX_LABEL" not in block
-    assert "MOM_ACTIVE_NASDAQ_KR_HYNIX_LABEL" not in block
-    assert "FABER_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL" not in block
-    assert "MOM_ACTIVE_NASDAQ_KR_SAMHYNIX_LABEL" not in block
-    assert "us_dividend_experiment_labels" not in source
-    assert "aggressive_no_bond_labels" not in source
+    assert not any("HAENAM" in name for name in referenced_globals)
+    assert not any("SAMSUNG" in name for name in referenced_globals)
+    assert not any("HYNIX" in name for name in referenced_globals)
 
 
-def test_strategy_quant_comparison_includes_event_risk_windows():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+def test_strategy_quant_comparison_has_two_strategy_mdd_periods():
+    backtest_mode = _function_symbol_table("mode_strategy_backtest")
+    referenced_globals = {
+        symbol.get_name()
+        for symbol in backtest_mode.get_symbols()
+        if symbol.is_referenced() and symbol.is_global()
+    }
 
-    assert "해남P 나스닥 액티브 vs 패시브 이벤트 위험" in source
-    assert '"2025년 4월 관세 이슈", pd.Timestamp("2025-04-01"), pd.Timestamp("2025-04-30")' in source
-    assert '"2026년 3월 전쟁 이슈", pd.Timestamp("2026-03-01"), pd.Timestamp("2026-03-31")' in source
-    assert 'event_active_nav = quant_aligned.get(MOM_ACTIVE_NASDAQ_KR_PASSIVE_LABEL)' in source
-    assert 'event_passive_nav = quant_aligned.get(MOM_PASSIVE_NASDAQ_KR_PASSIVE_LABEL)' in source
-    assert "액티브 MDD 더 큼" in source
-    assert "액티브 위험 더 큼" in source
+    assert "find_mdd_period" in referenced_globals
+    assert "find_monthly_mdd_period" in referenced_globals
 
 
 def test_live_monthly_reference_uses_original_faber_a_passive_weights():
@@ -331,7 +294,21 @@ def test_default_monthly_ledger_has_confirmed_june_2026_basis():
     assert june["official_profit"] == 6_940_263
 
 
-def test_main_menu_restores_legacy_backtest_surfaces_centered_on_faber_a():
+def test_july_2026_month_end_and_deposit_are_confirmed_for_august_benchmark():
+    ledger = _module_assignment("DEFAULT_MONTHLY_LEDGER")
+    cash_flows = _module_assignment("PERSONAL_CASH_FLOWS_CONFIRMED")
+    july = ledger["2026-07"]
+
+    assert july["month_start_assets"] == 319_352_259
+    assert july["month_end_date"] == "2026-07-31"
+    assert july["month_end_assets"] == 299_356_616
+    assert july["deposit"] == 15_795_862
+    assert july["net_external_cash_flow"] == 15_795_862
+    assert july["official_profit"] == -35_791_505
+    assert cash_flows["2026-07-31"] == 15_795_862
+
+
+def test_main_menu_only_exposes_main_and_strategy_backtest():
     source = APP_SOURCE.read_text(encoding="utf-8")
     main_block = re.search(r"def main\(\):.*?if __name__ == \"__main__\":", source, flags=re.S)
 
@@ -339,14 +316,39 @@ def test_main_menu_restores_legacy_backtest_surfaces_centered_on_faber_a():
     block = main_block.group(0)
     assert '"1. MAIN"' in block
     assert '"2. 전략 백테스트 (시장 분석)"' in block
-    assert '"3. 몬테카를로 시뮬레이션"' in block
-    assert '"4. Buy & Hold"' in block
-    assert '"5. 종목/ETF 분석"' in block
+    assert '"3. 몬테카를로 시뮬레이션"' not in block
+    assert '"4. Buy & Hold"' not in block
+    assert '"5. 종목/ETF 분석"' not in block
     assert "금 괴리율 차익거래 계산기" not in block
     assert "부동산 매수 신호" not in block
     assert "mode_strategy_backtest(current_dt, bt_end_date, price_col, bt_start_date)" in block
-    assert "mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_capital)" in block
-    assert "mode_buy_hold_sandbox(current_dt)" in block
+    assert "mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_capital)" not in block
+    assert "mode_buy_hold_sandbox(current_dt)" not in block
+
+
+def test_strategy_backtest_displays_previous_calendar_month_return():
+    backtest_mode = _function_symbol_table("mode_strategy_backtest")
+    local_names = {symbol.get_name() for symbol in backtest_mode.get_symbols()}
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    start = source.index("def mode_strategy_backtest")
+    end = source.index("\ndef ", start + 1)
+    mode_source = source[start:end]
+
+    assert "previous_month" in local_names
+    assert "previous_month_return" in local_names
+    assert "직전 달 수익률" in mode_source
+
+
+def test_strategy_backtest_displays_asset_and_recent_monthly_returns():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    start = source.index("def mode_strategy_backtest")
+    end = source.index("\ndef ", start + 1)
+    mode_source = source[start:end]
+
+    assert "calculate_monthly_return_series" in mode_source
+    assert "직전 달 자산별 수익률" in mode_source
+    assert "최근 12개월 월별 수익률" in mode_source
+    assert "[*ASSETS.keys(), CASH_NAME]" in mode_source
 
 
 def test_portfolio_mode_exposes_macro_cycle_vix_and_fear_greed_monitor():

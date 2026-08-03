@@ -698,6 +698,7 @@ PERSONAL_CASH_FLOWS_PENDING: dict[str, Any] = {
 # 확정 입금 — NAV 계산에 반영됨. 입금 확정마다 여기에 추가.
 PERSONAL_CASH_FLOWS_CONFIRMED = {
     "2026-04-30": 30_000_000,  # 3천만 원 대출금 Faber 추가투입
+    "2026-07-31": 15_795_862,  # 7월 외부 입금, 벤치마크 수익과 분리
 }
 PERSONAL_CASH_FLOWS = PERSONAL_CASH_FLOWS_CONFIRMED  # 계산에 사용되는 것은 확정분만
 APP_DIR = Path(__file__).resolve().parent
@@ -762,6 +763,18 @@ DEFAULT_MONTHLY_LEDGER = {
         "net_external_cash_flow": 0,
         "official_profit": 6_940_263,
         "official_return": 0.0222,
+    },
+    "2026-07": {
+        "month": "2026-07",
+        "month_start_date": "2026-06-30",
+        "month_start_assets": 319_352_259,
+        "month_end_date": "2026-07-31",
+        "month_end_assets": 299_356_616,
+        "deposit": 15_795_862,
+        "withdrawal": 0,
+        "net_external_cash_flow": 15_795_862,
+        "official_profit": -35_791_505,
+        "official_return": -0.1121,
     },
 }
 
@@ -4679,6 +4692,26 @@ def calculate_monthly_mdd(daily_nav_df):
     return float(dd.min()) if dd is not None and not dd.empty else None
 
 
+def calculate_monthly_return_series(data_df, value_col="nav"):
+    """월말 종가(NAV) 기준 월수익률 시계열을 PeriodIndex로 반환한다."""
+    if data_df is None or data_df.empty:
+        return pd.Series(dtype=float)
+
+    col = value_col if value_col in data_df.columns else (
+        "Close" if "Close" in data_df.columns else None
+    )
+    if col is None:
+        return pd.Series(dtype=float)
+
+    values = pd.to_numeric(data_df[col], errors="coerce").dropna()
+    values = values[~values.index.duplicated(keep="last")].sort_index()
+    if values.empty:
+        return pd.Series(dtype=float)
+
+    monthly_values = values.groupby(values.index.to_period("M")).last()
+    return monthly_values.pct_change().dropna()
+
+
 def calculate_ulcer_index(daily_nav_df):
     """Ulcer Index: drawdown(%)의 RMS. 높을수록 체감 고통이 큼."""
     if daily_nav_df is None or daily_nav_df.empty or "drawdown" not in daily_nav_df.columns:
@@ -6124,7 +6157,7 @@ def _get_account_balance_value(session_key, default):
 # ==============================
 # 10. UI 모드들
 # ==============================
-def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
+def _legacy_mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
     requested_backtest_end = normalize_to_date(current_date)
     current_date = requested_backtest_end
     st.title("📈 전략 백테스트 & 시장 분석")
@@ -7631,7 +7664,206 @@ def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
         st.write(f"**평균 투자 자산 수: {avg_invested:.1f}개** / {len(whipsaw_asset_keys)}개")
         
         st.dataframe(df_whipsaw, use_container_width=True, hide_index=True, height=400)
-    
+
+
+def mode_strategy_backtest(current_dt, current_date, price_col, bt_start_date):
+    """원조 Faber A와 연속모멘텀만 같은 시장 데이터·기간으로 비교한다."""
+    requested_end = normalize_to_date(current_date)
+    initial_capital = 10_000_000
+
+    st.title("📈 전략 백테스트 (시장 분석)")
+    st.caption(
+        "동일한 5개 패시브 자산과 현금(MMF)을 사용하고, 신호 방식만 "
+        "Faber A(-5%룰)와 연속모멘텀으로 나눠 비교합니다."
+    )
+    st.markdown(f"**기준시각:** {current_dt.strftime('%Y년 %m월 %d일 %H:%M:%S')}")
+    st.markdown("---")
+
+    data_start = bt_start_date - relativedelta(months=18)
+    with st.spinner("시장 데이터와 두 전략의 백테스트를 계산하는 중..."):
+        all_data = load_market_data(data_start, requested_end, hybrid=True)
+        all_data = clamp_market_data_to_date(all_data, requested_end)
+
+        if all_data is None:
+            st.error("시장 데이터가 부족해 백테스트를 계산할 수 없습니다.")
+            return
+
+        faber_nav = simulate_faber_strategy(
+            bt_start_date,
+            requested_end,
+            initial_capital,
+            all_data,
+            mode="A",
+            buffer_df=None,
+            price_col=price_col,
+        )
+        momentum_nav, _, _, _ = simulate_daily_nav_with_attribution(
+            bt_start_date,
+            requested_end,
+            initial_capital,
+            all_data,
+            price_col=price_col,
+        )
+
+    strategy_navs = {
+        "Faber A": faber_nav,
+        "연속모멘텀": momentum_nav,
+    }
+    aligned, comparison_meta, comparison_status = align_strategies_to_common_dates(
+        strategy_navs,
+        min_obs_days=252,
+    )
+    if comparison_meta["common_obs"] == 0 or len(aligned) < 2:
+        st.error("두 전략의 공통 거래일 데이터가 부족해 비교할 수 없습니다.")
+        st.dataframe(comparison_status, use_container_width=True, hide_index=True)
+        return
+
+    # 공통 시작일을 1,000만원으로 다시 맞춰 금액 규모가 아닌 전략 수익률만 비교한다.
+    for label, nav in aligned.items():
+        scaled = nav.copy()
+        scaled["nav"] = scaled["nav"] / float(scaled["nav"].iloc[0]) * initial_capital
+        scaled["running_max"] = scaled["nav"].cummax()
+        scaled["drawdown"] = scaled["nav"] / scaled["running_max"] - 1.0
+        aligned[label] = scaled
+
+    common_start = comparison_meta["common_start"]
+    common_end = comparison_meta["common_end"]
+    previous_month = pd.Timestamp(requested_end).to_period("M") - 1
+    previous_month_label = previous_month.strftime("%Y-%m")
+    st.caption(
+        f"공통 비교 기간: {common_start.strftime('%Y-%m-%d')} ~ "
+        f"{common_end.strftime('%Y-%m-%d')} ({comparison_meta['common_obs']:,}거래일)"
+    )
+
+    metric_rows = []
+    mdd_rows = []
+    strategy_monthly_returns = {}
+    for label in ("Faber A", "연속모멘텀"):
+        nav = aligned[label]
+        monthly_returns = calculate_monthly_return_series(nav, "nav")
+        strategy_monthly_returns[label] = monthly_returns
+        previous_month_return = monthly_returns.get(previous_month)
+        final_value, total_return, daily_mdd, cagr = calculate_performance_metrics(nav, initial_capital)
+        monthly_mdd = calculate_monthly_mdd(nav)
+        volatility = calculate_annualized_volatility(nav)
+        sharpe = calculate_sharpe_ratio(nav)
+        sortino = calculate_sortino_ratio(nav)
+        ulcer = calculate_ulcer_index(nav)
+        cvar_5 = calculate_monthly_cvar(nav, alpha=0.05)
+        positive_month = calculate_positive_month_ratio(nav)
+        cagr_mdd = cagr / abs(daily_mdd) if cagr is not None and cagr > 0 and daily_mdd < 0 else None
+
+        daily_peak, daily_valley, _ = find_mdd_period(nav)
+        monthly_peak, monthly_valley, _ = find_monthly_mdd_period(nav)
+        metric_rows.append({
+            "전략": label,
+            "최종 NAV": f"{final_value:,.0f}원",
+            "누적수익률": f"{total_return:.2%}",
+            f"직전 달 수익률 ({previous_month_label})": (
+                f"{previous_month_return:.2%}" if previous_month_return is not None else "-"
+            ),
+            "CAGR": f"{cagr:.2%}",
+            "MDD (일별)": f"{daily_mdd:.2%}",
+            "MDD (월말)": f"{monthly_mdd:.2%}" if monthly_mdd is not None else "-",
+            "변동성": f"{volatility:.2%}" if volatility is not None else "-",
+            "Sharpe": f"{sharpe:.2f}" if sharpe is not None else "-",
+            "Sortino": f"{sortino:.2f}" if sortino is not None else "-",
+            "CAGR / MDD": f"{cagr_mdd:.2f}" if cagr_mdd is not None else "-",
+            "Ulcer Index": f"{ulcer:.2f}" if ulcer is not None else "-",
+            "CVaR 5% (월)": f"{cvar_5:.2%}" if cvar_5 is not None else "-",
+            "양(+)월 비율": f"{positive_month:.1%}" if positive_month is not None else "-",
+        })
+        mdd_rows.append({
+            "전략": label,
+            "일별 MDD 구간": (
+                f"{daily_peak.strftime('%Y-%m-%d')} → {daily_valley.strftime('%Y-%m-%d')}"
+                if daily_peak is not None and daily_valley is not None else "-"
+            ),
+            "일별 MDD": f"{daily_mdd:.2%}",
+            "월말 MDD 구간": (
+                f"{monthly_peak.strftime('%Y-%m-%d')} → {monthly_valley.strftime('%Y-%m-%d')}"
+                if monthly_peak is not None and monthly_valley is not None else "-"
+            ),
+            "월말 MDD": f"{monthly_mdd:.2%}" if monthly_mdd is not None else "-",
+        })
+
+    st.subheader("📊 핵심 성과 비교")
+    st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
+
+    asset_monthly_returns = {}
+    asset_rows = []
+    for asset_name in [*ASSETS.keys(), CASH_NAME]:
+        asset_returns = calculate_monthly_return_series(all_data.get(asset_name), price_col)
+        asset_monthly_returns[asset_name] = asset_returns
+        asset_return = asset_returns.get(previous_month)
+        asset_rows.append({
+            "자산": asset_name,
+            f"월 수익률 ({previous_month_label})": (
+                f"{asset_return:.2%}" if asset_return is not None and pd.notna(asset_return) else "-"
+            ),
+        })
+
+    st.subheader(f"📦 직전 달 자산별 수익률 ({previous_month_label})")
+    st.caption("각 자산의 월말 수정주가 기준 원화 수익률입니다. 전략 수익률과는 별도입니다.")
+    st.dataframe(pd.DataFrame(asset_rows), use_container_width=True, hide_index=True)
+
+    completed_months = sorted({
+        period
+        for returns in [*strategy_monthly_returns.values(), *asset_monthly_returns.values()]
+        for period in returns.index
+        if period <= previous_month
+    })[-12:]
+    monthly_rows = []
+    for period in reversed(completed_months):
+        row = {"월": period.strftime("%Y-%m")}
+        for label in ("Faber A", "연속모멘텀"):
+            value = strategy_monthly_returns[label].get(period)
+            row[label] = f"{value:.2%}" if value is not None and pd.notna(value) else "-"
+        for asset_name in [*ASSETS.keys(), CASH_NAME]:
+            value = asset_monthly_returns[asset_name].get(period)
+            row[asset_name] = f"{value:.2%}" if value is not None and pd.notna(value) else "-"
+        monthly_rows.append(row)
+
+    st.subheader("📅 최근 12개월 월별 수익률")
+    st.caption("완료된 월만 표시하며, 가장 최근 월이 위에 나옵니다.")
+    st.dataframe(pd.DataFrame(monthly_rows), use_container_width=True, hide_index=True, height=455)
+
+    faber_aligned = aligned["Faber A"]
+    momentum_aligned = aligned["연속모멘텀"]
+    faber_peak, faber_valley, _ = find_mdd_period(faber_aligned)
+    faber_monthly_peak, faber_monthly_valley, faber_monthly_mdd = find_monthly_mdd_period(faber_aligned)
+    fig = create_nav_and_drawdown_chart(
+        faber_aligned,
+        initial_capital,
+        faber_peak,
+        faber_valley,
+        "Faber A vs 연속모멘텀: 수익률과 낙폭",
+        monthly_peak_date=faber_monthly_peak,
+        monthly_valley_date=faber_monthly_valley,
+        monthly_mdd_val=faber_monthly_mdd,
+        extra_navs={"연속모멘텀": (momentum_aligned, "#ff7f0e", "dash")},
+        primary_label="Faber A",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📉 MDD 구간 비교")
+    st.dataframe(pd.DataFrame(mdd_rows), use_container_width=True, hide_index=True)
+
+    yearly_rows = []
+    years = sorted(set(faber_aligned.index.year) | set(momentum_aligned.index.year), reverse=True)
+    for year in years:
+        row = {"연도": year}
+        for label in ("Faber A", "연속모멘텀"):
+            stats = calculate_yearly_daily_stats(aligned[label], year)
+            row[label] = f"{stats['yearly_return']:.2%}" if stats is not None else "-"
+        yearly_rows.append(row)
+
+    st.subheader("📅 연도별 수익률")
+    st.dataframe(pd.DataFrame(yearly_rows), use_container_width=True, hide_index=True, height=500)
+    with st.expander("데이터 비교 상태", expanded=False):
+        st.dataframe(comparison_status, use_container_width=True, hide_index=True)
+
+
 def mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date):
     st.title("MAIN")
     st.subheader("Faber A 실전 & 리밸런싱")
@@ -8622,9 +8854,6 @@ def main():
     options = [
         "1. MAIN",
         "2. 전략 백테스트 (시장 분석)",
-        "3. 몬테카를로 시뮬레이션",
-        "4. Buy & Hold",
-        "5. 종목/ETF 분석",
     ]
     if "mode_select" not in st.session_state or st.session_state["mode_select"] not in options:
         st.session_state["mode_select"] = options[0]
@@ -8632,14 +8861,8 @@ def main():
 
     if mode.startswith("1."):
         mode_live_and_rebalance(current_dt, current_date, price_col, inv_start_date, init_capital, hist_profit, bt_start_date)
-    elif mode.startswith("2."):
-        mode_strategy_backtest(current_dt, bt_end_date, price_col, bt_start_date)
-    elif mode.startswith("3."):
-        mode_monte_carlo(current_dt, current_date, price_col, bt_start_date, init_capital)
-    elif mode.startswith("4."):
-        mode_buy_hold_sandbox(current_dt)
     else:
-        mode_asset_analysis(current_dt, current_date, price_col)
+        mode_strategy_backtest(current_dt, bt_end_date, price_col, bt_start_date)
 
     st.markdown("---")
     st.caption("ℹ️ 본 대시보드는 과거 데이터 기반이며 투자 권유가 아닙니다.")
